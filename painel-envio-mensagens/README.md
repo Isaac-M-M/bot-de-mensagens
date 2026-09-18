@@ -1,0 +1,85 @@
+# Painel de Envio de Mensagens (WhatsApp + E-mail)
+
+Interface web local: você escreve a mensagem, escolhe o canal e envia — sem precisar editar código.
+
+## O que ele faz
+- **WhatsApp**: manda para um contato único, um grupo, ou toda a lista da planilha.
+- **E-mail**: manda pra todos os contatos com e-mail preenchido na planilha (via Gmail), com rotação automática entre várias contas.
+- Uma única planilha (`contatos.xlsx`) alimenta os dois canais — com botões para baixar o modelo e enviar a planilha preenchida direto pela página.
+- Suporta personalização com `{{nome}}`, e até mensagens diferentes por pessoa.
+- Acesso protegido por usuário e senha (configurado na primeira vez, pelo próprio navegador).
+
+## Instalação (só na primeira vez)
+
+1. Extraia todos os arquivos numa pasta (ex: Área de Trabalho).
+2. Dê **dois cliques em `Instalar.bat`**.
+
+Esse instalador faz tudo sozinho:
+- Verifica se o Node.js está no computador; se não estiver, baixa e instala automaticamente (pode pedir permissão de administrador do Windows — normal, aceite)
+- Instala todas as dependências do painel
+- Cria um atalho **"Painel de Envio de Mensagens"** na sua Área de Trabalho, já com o ícone
+- Pergunta se quer abrir o painel na hora
+
+**Se alguma parte falhar** (ex: sem internet, política de segurança bloqueando o PowerShell), o instalador avisa o motivo em vez de travar. Nesse caso, me manda a mensagem de erro que aparecer.
+
+*Observação: essa etapa de instalação automática do Node.js precisa de internet e, às vezes, permissão de administrador — é a parte mais sensível do processo. Se preferir, você pode instalar o Node.js manualmente antes (em [nodejs.org](https://nodejs.org), versão "LTS") e rodar o `Instalar.bat` depois — nesse caso ele já pula essa etapa.*
+
+## Uso no dia a dia
+
+Depois de instalado, é só usar o atalho **"Painel de Envio de Mensagens"** que foi criado na Área de Trabalho. Ele abre uma janela limpa (sem barra de endereço) direto no painel — sem precisar abrir terminal nenhum.
+
+### Primeira abertura: configuração inicial
+Na primeira vez que o painel abrir, ele mostra uma tela pedindo:
+- Um usuário e senha pra proteger o acesso ao painel (obrigatório)
+- E-mail e senha de app do Gmail (opcional — pode configurar depois se quiser usar e-mail)
+
+Preencha e clique em "Salvar e começar a usar". Isso substitui a necessidade de editar arquivos `.env` na mão.
+
+**Sobre a senha de app do Gmail**: não é a senha normal da sua conta Google. Para gerar uma:
+1. Acesse [myaccount.google.com/security](https://myaccount.google.com/security) e ative a Verificação em duas etapas (obrigatório)
+2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Crie uma nova senha de app — o Google gera um código de 16 letras, é esse código que vai no painel
+
+Se quiser cadastrar **mais de uma conta Gmail** (pra rotação automática caso uma seja bloqueada), configure a primeira pela tela inicial e adicione as demais editando o arquivo `.env` depois, seguindo o padrão `GMAIL_USER_2` / `GMAIL_APP_PASSWORD_2`, `GMAIL_USER_3` / `GMAIL_APP_PASSWORD_3`, etc.
+
+### Preparar a planilha de contatos
+Direto na página do painel, no topo: **"⬇️ Baixar planilha modelo"** pra pegar o modelo já formatado, preencha, e **"📤 Enviar planilha preenchida"** pra carregar de volta.
+
+Colunas da planilha:
+
+| nome | telefone | email | mensagem |
+|---|---|---|---|
+| Maria Silva | 6199973622 | maria@exemplo.com | *(vazio)* |
+| Carlos Souza | 6198372141 | carlos@exemplo.com | Mensagem só pra ele, diferente da padrão |
+
+- Preencha `telefone` pra usar no WhatsApp, `email` pra usar no e-mail — não precisa preencher os dois se só for usar um canal.
+- A coluna `mensagem` é opcional: vazia usa a mensagem padrão da tela; preenchida, usa esse texto só pra aquela pessoa. Aceita `{{nome}}` também.
+
+### Conectar o WhatsApp (só na primeira vez usando essa aba)
+Na aba WhatsApp, um QR Code aparece direto na página — escaneie com **WhatsApp > Configurações > Aparelhos conectados > Conectar um aparelho**. Depois disso fica conectado, não precisa repetir.
+
+### Enviar mensagens
+- Escolha a aba (WhatsApp ou E-mail)
+- No WhatsApp: contato único, grupo (cole o ID — veja `bot-cronograma-diario/capturar-id-grupo.js` de outro projeto se precisar descobrir o ID de um grupo nosso), ou lista da planilha
+- Escreva a mensagem e clique em enviar
+
+## Arquivos do projeto (resumo)
+- `Instalar.bat` / `instalador.ps1` — instalador (rodar uma vez)
+- `Abrir Painel.vbs` — atalho do dia a dia (criado automaticamente na Área de Trabalho pelo instalador)
+- `iniciar-painel.bat` — mesma coisa que o `.vbs`, mas com a janela visível (útil pra diagnosticar problemas)
+- `launcher.js` / `server.js` — o programa em si
+- `painel-log.txt` — criado automaticamente, registra o que acontece quando roda pelo modo escondido
+
+## Cuidados
+- **Ritmo de envio**: o WhatsApp em lista espera de 8 a 15 segundos entre mensagens, pra evitar bloqueio. O e-mail espera 2 segundos entre cada envio.
+- **Gmail tem limite diário** por conta (o painel considera ~400/dia por segurança). Com múltiplas contas cadastradas, a capacidade soma.
+- **Como fechar o painel**: se abriu pelo atalho (modo escondido), feche a janela do navegador — o programa continua rodando por trás. Pra encerrar de vez, abra o Gerenciador de Tarefas (Ctrl+Shift+Esc) e finalize o processo "Node.js JavaScript Runtime".
+- **Nunca compartilhe o arquivo `.env`** — tem as senhas de app do Gmail e a senha de acesso ao painel.
+
+## Se for usar isso comercialmente (vender/instalar pra clientes)
+Antes de oferecer isso como produto ou serviço pago, deixe claro pro cliente:
+
+- **O envio por WhatsApp usa uma biblioteca não-oficial** (`whatsapp-web.js`), que simula o WhatsApp Web — não é a API oficial da Meta. Isso é contra os Termos de Serviço do WhatsApp, e o número pode ser bloqueado, especialmente com uso intenso.
+- A alternativa 100% oficial (WhatsApp Business API) tem custo por mensagem e processo de aprovação — considere migrar se o volume de envio crescer muito.
+- A biblioteca pode parar de funcionar temporariamente quando o WhatsApp muda algo internamente (já aconteceu mais de uma vez durante o desenvolvimento deste painel) — combine um plano de suporte pra esses casos.
+- Recomendo formalizar por escrito com o cliente que ele está ciente desses riscos antes de instalar.

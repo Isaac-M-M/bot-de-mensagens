@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuração inicial — Painel de Envio</title>
+  <link rel="icon" type="image/png" href="icone-painel.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>👋 Bem-vindo!</h1>
+      <p class="subtitle">Antes de usar o painel pela primeira vez, vamos fazer uma configuração rápida.</p>
+    </header>
+
+    <form id="form-config">
+      <p class="info-msg">🔒 Essa senha protege o acesso ao painel — qualquer pessoa na mesma rede sem ela não consegue abrir.</p>
+
+      <label for="painel-usuario">Usuário para acessar o painel:</label>
+      <input type="text" id="painel-usuario" placeholder="Ex: admin" required />
+
+      <label for="painel-senha">Senha para acessar o painel:</label>
+      <input type="password" id="painel-senha" placeholder="Escolha uma senha" required />
+
+      <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--borda);" />
+
+      <p class="info-msg">
+        📧 (Opcional) Se for usar o envio por e-mail agora, preencha abaixo. Se não, pode deixar em branco e configurar depois.
+        Você precisa de uma <strong>"Senha de app"</strong> do Gmail (não é a senha normal da sua conta) —
+        gere em <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>.
+      </p>
+
+      <label for="gmail-user">Seu e-mail do Gmail:</label>
+      <input type="text" id="gmail-user" placeholder="seuemail@gmail.com" />
+
+      <label for="gmail-senha">Senha de app do Gmail:</label>
+      <input type="text" id="gmail-senha" placeholder="xxxx xxxx xxxx xxxx" />
+
+      <button type="submit" class="btn-enviar">Salvar e começar a usar</button>
+      <p id="config-erro" class="hidden" style="color:#c0392b; font-size: 13px; margin-top: 10px;"></p>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById("form-config").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const erroEl = document.getElementById("config-erro");
+      erroEl.classList.add("hidden");
+
+      const painelUsuario = document.getElementById("painel-usuario").value;
+      const painelSenha = document.getElementById("painel-senha").value;
+      const gmailUser = document.getElementById("gmail-user").value;
+      const gmailSenha = document.getElementById("gmail-senha").value;
+
+      try {
+        const res = await fetch("/configuracao-inicial", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ painelUsuario, painelSenha, gmailUser, gmailSenha }),
+        });
+        const data = await res.json();
+        if (data.erro) {
+          erroEl.textContent = "❌ " + data.erro;
+          erroEl.classList.remove("hidden");
+          return;
+        }
+        // Configuração salva — recarrega pra já cair no painel normal
+        window.location.reload();
+      } catch (err) {
+        erroEl.textContent = "❌ Erro ao salvar: " + err.message;
+        erroEl.classList.remove("hidden");
+      }
+    });
+  </script>
+</body>
+</html>

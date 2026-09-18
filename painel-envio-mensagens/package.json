@@ -1,0 +1,19 @@
+{
+  "name": "painel-envio-mensagens",
+  "version": "1.0.0",
+  "description": "Interface web local para enviar mensagens por WhatsApp ou E-mail",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
+    "qrcode": "^1.5.3",
+    "xlsx": "^0.18.5",
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.13",
+    "dotenv": "^16.4.5",
+    "multer": "^1.4.5-lts.1"
+  }
+}
