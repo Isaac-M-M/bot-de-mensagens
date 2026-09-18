@@ -6,7 +6,6 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "instalar-dependencias": "cross-env PUPPETEER_CACHE_DIR=./.chromium-cache npm install",
     "dist": "electron-builder --win nsis"
   },
   "dependencies": {
@@ -20,7 +19,6 @@
     "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
   },
