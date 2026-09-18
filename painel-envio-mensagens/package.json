@@ -1,19 +1,65 @@
 {
   "name": "painel-envio-mensagens",
   "version": "1.0.0",
-  "description": "Interface web local para enviar mensagens por WhatsApp ou E-mail",
-  "main": "server.js",
+  "description": "Interface local para enviar mensagens por WhatsApp ou E-mail",
+  "main": "main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "electron .",
+    "instalar-dependencias": "cross-env PUPPETEER_CACHE_DIR=./.chromium-cache npm install",
+    "dist": "electron-builder --win nsis"
   },
   "dependencies": {
     "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#main",
+    "puppeteer": "^24.38.0",
     "qrcode": "^1.5.3",
     "xlsx": "^0.18.5",
     "express": "^4.19.2",
     "nodemailer": "^6.9.13",
     "dotenv": "^16.4.5",
     "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.painelenviomensagens.app",
+    "productName": "Painel de Envio de Mensagens",
+    "icon": "icone-painel.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!.chromium-cache/**",
+      "!.wwebjs_auth/**",
+      "!.wwebjs_cache/**",
+      "!.env",
+      "!contatos.xlsx",
+      "!controle-remetentes.json",
+      "!dist/**"
+    ],
+    "asarUnpack": [
+      "node_modules/puppeteer/**",
+      "node_modules/whatsapp-web.js/**",
+      "node_modules/@puppeteer/**"
+    ],
+    "extraResources": [
+      { "from": ".chromium-cache", "to": "chromium-cache" }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icone-painel.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Painel de Envio de Mensagens"
+    }
   }
 }

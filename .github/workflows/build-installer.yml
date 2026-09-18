@@ -1,0 +1,41 @@
+name: Gerar instalador do Painel de Envio de Mensagens
+
+on:
+  push:
+    tags:
+      - "painel-v*"
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: painel-envio-mensagens
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências (inclui o Chromium do WhatsApp)
+        run: npm run instalar-dependencias
+
+      - name: Gerar instalador Windows (.exe)
+        run: npm run dist
+
+      - name: Publicar instalador como artefato do workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: Instalador-Painel-de-Envio-de-Mensagens
+          path: painel-envio-mensagens/dist/*.exe
+          if-no-files-found: error
+
+      - name: Criar Release com o instalador anexado
+        if: startsWith(github.ref, 'refs/tags/painel-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: painel-envio-mensagens/dist/*.exe

@@ -1,0 +1,13 @@
+node_modules/
+
+# Dados do usuário (gerados ao usar o programa, nunca devem ir pro repositório)
+.env
+.wwebjs_auth/
+.wwebjs_cache/
+contatos.xlsx
+controle-remetentes.json
+painel-log.txt
+
+# Artefatos de build do instalador
+.chromium-cache/
+dist/

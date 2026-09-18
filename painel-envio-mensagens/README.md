@@ -11,22 +11,21 @@ Interface web local: você escreve a mensagem, escolhe o canal e envia — sem p
 
 ## Instalação (só na primeira vez)
 
-1. Extraia todos os arquivos numa pasta (ex: Área de Trabalho).
-2. Dê **dois cliques em `Instalar.bat`**.
+1. Baixe o instalador **`Painel de Envio de Mensagens Setup.exe`** (veja com quem te vendeu o programa, ou em **Releases**/**Actions** do repositório — veja a seção "Gerar um novo instalador", mais abaixo).
+2. Dê **dois cliques** no arquivo baixado.
 
-Esse instalador faz tudo sozinho:
-- Verifica se o Node.js está no computador; se não estiver, baixa e instala automaticamente (pode pedir permissão de administrador do Windows — normal, aceite)
-- Instala todas as dependências do painel
-- Cria um atalho **"Painel de Envio de Mensagens"** na sua Área de Trabalho, já com o ícone
-- Pergunta se quer abrir o painel na hora
+Pronto. O instalador:
+- Não pede nada — instala sozinho (já vem com tudo: programa, WhatsApp e o "navegador" internos, nada pra baixar depois)
+- Cria o atalho **"Painel de Envio de Mensagens"** na Área de Trabalho e no Menu Iniciar
+- Abre o painel automaticamente assim que termina
 
-**Se alguma parte falhar** (ex: sem internet, política de segurança bloqueando o PowerShell), o instalador avisa o motivo em vez de travar. Nesse caso, me manda a mensagem de erro que aparecer.
-
-*Observação: essa etapa de instalação automática do Node.js precisa de internet e, às vezes, permissão de administrador — é a parte mais sensível do processo. Se preferir, você pode instalar o Node.js manualmente antes (em [nodejs.org](https://nodejs.org), versão "LTS") e rodar o `Instalar.bat` depois — nesse caso ele já pula essa etapa.*
+Não precisa instalar Node.js, Chrome, nem nada — é um único arquivo, um único clique, e já funciona. Não é necessário nem ser administrador do computador.
 
 ## Uso no dia a dia
 
-Depois de instalado, é só usar o atalho **"Painel de Envio de Mensagens"** que foi criado na Área de Trabalho. Ele abre uma janela limpa (sem barra de endereço) direto no painel — sem precisar abrir terminal nenhum.
+Depois de instalado, é só usar o atalho **"Painel de Envio de Mensagens"** (Área de Trabalho ou Menu Iniciar). Ele abre uma janela própria do programa, sem precisar abrir terminal nenhum.
+
+**Fechar o programa** agora funciona como qualquer outro programa: feche a janela (X) e ele encerra tudo de verdade — não fica nada rodando escondido. Por isso, abrir de novo pelo atalho sempre funciona. Se por acaso você clicar duas vezes no atalho enquanto o programa já está aberto, ele não abre uma segunda cópia — só traz a janela que já existe pra frente.
 
 ### Primeira abertura: configuração inicial
 Na primeira vez que o painel abrir, ele mostra uma tela pedindo:
@@ -40,7 +39,7 @@ Preencha e clique em "Salvar e começar a usar". Isso substitui a necessidade de
 2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
 3. Crie uma nova senha de app — o Google gera um código de 16 letras, é esse código que vai no painel
 
-Se quiser cadastrar **mais de uma conta Gmail** (pra rotação automática caso uma seja bloqueada), configure a primeira pela tela inicial e adicione as demais editando o arquivo `.env` depois, seguindo o padrão `GMAIL_USER_2` / `GMAIL_APP_PASSWORD_2`, `GMAIL_USER_3` / `GMAIL_APP_PASSWORD_3`, etc.
+Se quiser cadastrar **mais de uma conta Gmail** (pra rotação automática caso uma seja bloqueada), configure a primeira pela tela inicial e adicione as demais editando o arquivo `.env` depois, seguindo o padrão `GMAIL_USER_2` / `GMAIL_APP_PASSWORD_2`, `GMAIL_USER_3` / `GMAIL_APP_PASSWORD_3`, etc. (veja `.env.example`). Esse `.env` fica em `%APPDATA%\painel-envio-mensagens\.env` — não dentro da pasta onde o programa foi instalado.
 
 ### Preparar a planilha de contatos
 Direto na página do painel, no topo: **"⬇️ Baixar planilha modelo"** pra pegar o modelo já formatado, preencha, e **"📤 Enviar planilha preenchida"** pra carregar de volta.
@@ -64,17 +63,40 @@ Na aba WhatsApp, um QR Code aparece direto na página — escaneie com **WhatsAp
 - Escreva a mensagem e clique em enviar
 
 ## Arquivos do projeto (resumo)
-- `Instalar.bat` / `instalador.ps1` — instalador (rodar uma vez)
-- `Abrir Painel.vbs` — atalho do dia a dia (criado automaticamente na Área de Trabalho pelo instalador)
-- `iniciar-painel.bat` — mesma coisa que o `.vbs`, mas com a janela visível (útil pra diagnosticar problemas)
-- `launcher.js` / `server.js` — o programa em si
-- `painel-log.txt` — criado automaticamente, registra o que acontece quando roda pelo modo escondido
+- `main.js` — processo principal do programa (abre a janela, garante que fecha direito e que não abre em dobro)
+- `server.js` — o painel em si (rotas, envio de WhatsApp/e-mail, planilha de contatos)
+- `public/` — a interface (HTML/CSS/JS) que aparece na janela
+- `.env.example` — referência para quem quiser cadastrar mais de uma conta Gmail manualmente
+- Os dados de cada instalação (`.env`, `contatos.xlsx`, `controle-remetentes.json`, sessão do WhatsApp) ficam guardados na pasta de perfil do Windows, fora da pasta do programa — sobrevivem a uma reinstalação do instalador.
 
 ## Cuidados
 - **Ritmo de envio**: o WhatsApp em lista espera de 8 a 15 segundos entre mensagens, pra evitar bloqueio. O e-mail espera 2 segundos entre cada envio.
 - **Gmail tem limite diário** por conta (o painel considera ~400/dia por segurança). Com múltiplas contas cadastradas, a capacidade soma.
-- **Como fechar o painel**: se abriu pelo atalho (modo escondido), feche a janela do navegador — o programa continua rodando por trás. Pra encerrar de vez, abra o Gerenciador de Tarefas (Ctrl+Shift+Esc) e finalize o processo "Node.js JavaScript Runtime".
 - **Nunca compartilhe o arquivo `.env`** — tem as senhas de app do Gmail e a senha de acesso ao painel.
+
+## Gerar um novo instalador (para quem desenvolve/vende o programa)
+
+Como o instalador Windows (`.exe`) não pode ser gerado num computador Linux/Mac, isso é feito automaticamente pelo GitHub Actions, num computador Windows temporário na nuvem:
+
+1. No GitHub, vá em **Actions → "Gerar instalador do Painel de Envio de Mensagens" → Run workflow** (botão manual), ou crie e envie uma tag no padrão `painel-v1.0.0`:
+   ```
+   git tag painel-v1.0.0
+   git push origin painel-v1.0.0
+   ```
+2. Espere o workflow terminar (uns 5-10 minutos — ele baixa tudo, inclusive o "navegador" usado pelo WhatsApp, e empacota).
+3. Baixe o instalador pronto:
+   - Em **Actions**, na execução que rodou, na seção "Artifacts" (se disparou manualmente ou por push comum); ou
+   - Em **Releases** (se disparou com uma tag `painel-v*`) — esse já fica com link direto pra compartilhar com os clientes.
+
+Esse `.exe` é o único arquivo que o cliente final precisa baixar e executar — o resto (Node.js, dependências, Chromium) já vai tudo embutido nele.
+
+### Gerando localmente (se tiver Windows à mão)
+```
+cd painel-envio-mensagens
+npm run instalar-dependencias
+npm run dist
+```
+O instalador aparece em `painel-envio-mensagens/dist/*.exe`.
 
 ## Se for usar isso comercialmente (vender/instalar pra clientes)
 Antes de oferecer isso como produto ou serviço pago, deixe claro pro cliente:
