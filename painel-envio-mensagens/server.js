@@ -12,6 +12,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const express = require("express");
 const QRCode = require("qrcode");
 const xlsx = require("xlsx");
@@ -284,10 +285,56 @@ function iniciarServidor({ dataDir, porta }) {
       return !fs.existsSync(ARQUIVO_ENV);
     }
 
+    // Nome do cookie que guarda a sessão de login, e a chave usada pra
+    // gerar/validar seu valor. Trocar SESSAO_SEGREDO (ex: trocando a senha)
+    // invalida sozinho qualquer sessão aberta antes — de propósito.
+    const COOKIE_SESSAO = "painel_sessao";
+
+    // Antes usávamos autenticação HTTP Basic (a caixinha nativa do
+    // navegador). Dentro do Electron ela se mostrou pouco confiável — às
+    // vezes simplesmente não aparece, deixando a pessoa presa numa tela de
+    // "acesso restrito" sem conseguir digitar a senha em lugar nenhum. Por
+    // isso trocamos para uma tela de login própria (login.html) + cookie de
+    // sessão, que é só HTML normal e sempre aparece.
+    function garantirSegredoSessao() {
+      if (process.env.SESSAO_SEGREDO || configuracaoInicialPendente()) return;
+      const segredo = crypto.randomBytes(32).toString("hex");
+      fs.appendFileSync(ARQUIVO_ENV, `SESSAO_SEGREDO=${segredo}\n`, "utf8");
+      process.env.SESSAO_SEGREDO = segredo;
+    }
+    garantirSegredoSessao();
+
+    function tokenDeSessaoValido() {
+      if (!process.env.SESSAO_SEGREDO) return null;
+      return crypto.createHmac("sha256", process.env.SESSAO_SEGREDO).update("painel-autenticado").digest("hex");
+    }
+
+    function lerCookie(req, nome) {
+      const header = req.headers.cookie || "";
+      for (const parte of header.split(";")) {
+        const item = parte.trim();
+        const idx = item.indexOf("=");
+        if (idx === -1) continue;
+        if (item.slice(0, idx) === nome) return decodeURIComponent(item.slice(idx + 1));
+      }
+      return null;
+    }
+
+    // Sem PAINEL_USUARIO/SENHA configurados, o painel fica acessível sem
+    // login pra qualquer pessoa na mesma rede (mesmo comportamento de antes).
+    function estaAutenticado(req) {
+      if (!process.env.PAINEL_USUARIO || !process.env.PAINEL_SENHA) return true;
+      const cookie = lerCookie(req, COOKIE_SESSAO);
+      const esperado = tokenDeSessaoValido();
+      return Boolean(cookie && esperado && cookie === esperado);
+    }
+
+    app.use(express.json());
+
     // Antes de qualquer outra coisa: se ainda não existe .env, mostra a tela
     // de configuração inicial em vez do painel normal (e libera a rota que
     // salva essa configuração, sem exigir login — ainda não há login definido).
-    app.post("/configuracao-inicial", express.json(), (req, res) => {
+    app.post("/configuracao-inicial", (req, res) => {
       // Trava importante: essa rota só funciona ANTES da configuração existir.
       // Depois que o .env já foi criado, ela fica bloqueada — senão qualquer
       // pessoa sem login poderia trocar a senha do painel por essa rota.
@@ -306,6 +353,7 @@ function iniciarServidor({ dataDir, porta }) {
         conteudo += `GMAIL_USER_1=${gmailUser.trim()}\nGMAIL_APP_PASSWORD_1=${gmailSenha.trim()}\n`;
       }
       conteudo += `PORTA=${PORTA_PREFERIDA}\n`;
+      conteudo += `SESSAO_SEGREDO=${crypto.randomBytes(32).toString("hex")}\n`;
 
       try {
         fs.writeFileSync(ARQUIVO_ENV, conteudo, "utf8");
@@ -314,51 +362,50 @@ function iniciarServidor({ dataDir, porta }) {
       }
 
       // Aplica na hora, sem precisar reiniciar o programa
-      process.env.PAINEL_USUARIO = painelUsuario.trim();
-      process.env.PAINEL_SENHA = painelSenha.trim();
-      if (gmailUser && gmailUser.trim() && gmailSenha && gmailSenha.trim()) {
-        process.env.GMAIL_USER_1 = gmailUser.trim();
-        process.env.GMAIL_APP_PASSWORD_1 = gmailSenha.trim();
-      }
+      require("dotenv").config({ path: ARQUIVO_ENV });
 
       res.json({ ok: true });
+    });
+
+    app.post("/login", (req, res) => {
+      const { usuario, senha } = req.body || {};
+      if (usuario === process.env.PAINEL_USUARIO && senha === process.env.PAINEL_SENHA) {
+        res.cookie(COOKIE_SESSAO, tokenDeSessaoValido(), {
+          httpOnly: true,
+          sameSite: "lax",
+          maxAge: 90 * 24 * 60 * 60 * 1000, // 90 dias — não precisa logar de novo toda hora
+        });
+        return res.json({ ok: true });
+      }
+      res.status(401).json({ erro: "Usuário ou senha incorretos." });
     });
 
     app.get("/", (req, res, next) => {
       if (configuracaoInicialPendente()) {
         return res.sendFile(path.join(__dirname, "public", "configuracao-inicial.html"));
       }
+      if (!estaAutenticado(req)) {
+        return res.sendFile(path.join(__dirname, "public", "login.html"));
+      }
       next();
     });
 
-    // Proteção por senha (opcional, mas recomendada): se PAINEL_USUARIO e
-    // PAINEL_SENHA estiverem definidos no .env, exige login antes de
-    // qualquer acesso. Sem isso configurado, o painel fica aberto pra
-    // qualquer pessoa na mesma rede — então avisamos no console.
-    function autenticacaoBasica(req, res, next) {
+    // Os arquivos estáticos (CSS, ícone, e o próprio login.html) precisam
+    // carregar mesmo antes do login, senão a tela de login não teria nem
+    // estilo. Nada sensível fica exposto aqui — só a interface em si.
+    app.use(express.static(path.join(__dirname, "public")));
+
+    // Proteção por senha (opcional, mas recomendada): protege as rotas que
+    // realmente fazem algo (ler/enviar contatos, mandar mensagens). Sem
+    // PAINEL_USUARIO/SENHA configurados, o painel fica aberto pra qualquer
+    // pessoa na mesma rede — então avisamos no console.
+    function exigirLogin(req, res, next) {
       if (configuracaoInicialPendente()) return next(); // ainda não há login definido
-
-      const usuario = process.env.PAINEL_USUARIO;
-      const senha = process.env.PAINEL_SENHA;
-      if (!usuario || !senha) return next();
-
-      const header = req.headers.authorization || "";
-      const [tipo, credenciais] = header.split(" ");
-      if (tipo === "Basic" && credenciais) {
-        const decodificado = Buffer.from(credenciais, "base64").toString("utf8");
-        const separador = decodificado.indexOf(":");
-        const u = decodificado.slice(0, separador);
-        const p = decodificado.slice(separador + 1);
-        if (u === usuario && p === senha) return next();
-      }
-
-      res.set("WWW-Authenticate", 'Basic realm="Painel de Envio de Mensagens"');
-      return res.status(401).send("Acesso restrito. Informe usuário e senha configurados no .env.");
+      if (estaAutenticado(req)) return next();
+      return res.status(401).json({ erro: "Sessão não autenticada. Recarregue a página e faça login novamente." });
     }
 
-    app.use(autenticacaoBasica);
-    app.use(express.json());
-    app.use(express.static(path.join(__dirname, "public")));
+    app.use(exigirLogin);
 
     if (configuracaoInicialPendente()) {
       console.log("ℹ️  Primeira execução detectada — abra o painel para concluir a configuração inicial.");

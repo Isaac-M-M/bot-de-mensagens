@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Painel de Envio</title>
+  <link rel="icon" type="image/png" href="icone-painel.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔒 Painel de Envio</h1>
+      <p class="subtitle">Informe o usuário e a senha configurados neste computador.</p>
+    </header>
+
+    <form id="form-login">
+      <label for="login-usuario">Usuário:</label>
+      <input type="text" id="login-usuario" autocomplete="username" required autofocus />
+
+      <label for="login-senha">Senha:</label>
+      <input type="password" id="login-senha" autocomplete="current-password" required />
+
+      <button type="submit" class="btn-enviar">Entrar</button>
+      <p id="login-erro" class="hidden" style="color:#c0392b; font-size: 13px; margin-top: 10px;"></p>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById("form-login").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const erroEl = document.getElementById("login-erro");
+      erroEl.classList.add("hidden");
+
+      const usuario = document.getElementById("login-usuario").value;
+      const senha = document.getElementById("login-senha").value;
+
+      try {
+        const res = await fetch("/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ usuario, senha }),
+        });
+        const data = await res.json();
+        if (data.erro) {
+          erroEl.textContent = "❌ " + data.erro;
+          erroEl.classList.remove("hidden");
+          return;
+        }
+        window.location.reload();
+      } catch (err) {
+        erroEl.textContent = "❌ Erro ao entrar: " + err.message;
+        erroEl.classList.remove("hidden");
+      }
+    });
+  </script>
+</body>
+</html>
