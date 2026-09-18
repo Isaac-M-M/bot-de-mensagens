@@ -91,9 +91,11 @@ Como o instalador Windows (`.exe`) não pode ser gerado num computador Linux/Mac
 Esse `.exe` é o único arquivo que o cliente final precisa baixar e executar — o resto (Node.js, dependências, Chromium) já vai tudo embutido nele.
 
 ### Gerando localmente (se tiver Windows à mão)
+No PowerShell:
 ```
 cd painel-envio-mensagens
-npm run instalar-dependencias
+$env:PUPPETEER_CACHE_DIR = "$PWD\.chromium-cache"
+npm install
 npm run dist
 ```
 O instalador aparece em `painel-envio-mensagens/dist/*.exe`.
