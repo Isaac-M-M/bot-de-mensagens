@@ -113,10 +113,20 @@ function iniciarServidor({ dataDir, porta }) {
       return digits;
     }
 
-    function resolverChatId(destino) {
+    // Resolve o ID de destino consultando o próprio WhatsApp (via
+    // getNumberId) em vez de só montar "numero@c.us" na mão. O WhatsApp
+    // passou a usar um sistema novo de identificação de contato (LID), e
+    // montar o ID manualmente pode disparar erros do tipo "No LID for
+    // user" na hora de enviar. Retorna null se o número não tiver WhatsApp.
+    async function resolverChatId(destino) {
       const valor = String(destino || "").trim();
-      if (valor.endsWith("@g.us") || valor.endsWith("@c.us")) return valor;
-      return `${formatarTelefone(valor)}@c.us`;
+      if (valor.endsWith("@g.us") || valor.endsWith("@c.us") || valor.endsWith("@lid")) return valor;
+
+      const numero = formatarTelefone(valor);
+      if (!numero) return null;
+
+      const idInfo = await waClient.getNumberId(numero);
+      return idInfo ? idInfo._serialized : null;
     }
 
     function lerContatos() {
@@ -476,7 +486,10 @@ function iniciarServidor({ dataDir, porta }) {
           if (!destino || !destino.trim()) {
             return res.status(400).json({ erro: "Informe o destino (número ou ID do grupo)." });
           }
-          const chatId = resolverChatId(destino);
+          const chatId = await resolverChatId(destino);
+          if (!chatId) {
+            return res.status(400).json({ erro: "Esse número não está no WhatsApp (ou o formato está incorreto)." });
+          }
           await waClient.sendMessage(chatId, mensagem);
           resultados.push({ destino, status: "enviado" });
         } else if (tipoDestino === "planilha") {
@@ -491,7 +504,11 @@ function iniciarServidor({ dataDir, porta }) {
                 resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "sem mensagem (nem individual, nem padrão)" });
                 continue;
               }
-              const chatId = resolverChatId(contato.telefone);
+              const chatId = await resolverChatId(contato.telefone);
+              if (!chatId) {
+                resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "número não está no WhatsApp" });
+                continue;
+              }
               const texto = personalizar(base, contato);
               await waClient.sendMessage(chatId, texto);
               resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "enviado" });
