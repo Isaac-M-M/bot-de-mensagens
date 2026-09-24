@@ -4,7 +4,10 @@ Interface web local: você escreve a mensagem, escolhe o canal e envia — sem p
 
 ## O que ele faz
 - **WhatsApp**: manda para um contato único, um grupo, ou toda a lista da planilha.
-- **E-mail**: manda pra todos os contatos com e-mail preenchido na planilha (via Gmail), com rotação automática entre várias contas.
+- **E-mail**: manda pra todos os contatos com e-mail preenchido na planilha, com rotação automática entre várias contas — **Gmail, Outlook, Zoho, Hostinger, GoDaddy ou qualquer SMTP customizado**.
+- **Campanhas**: em vez de só um envio avulso, dá pra criar, salvar e reenviar campanhas nomeadas — com histórico de quantos foram entregues, deram erro ou foram bloqueados.
+- **Agendamento**: escolha dias da semana e um horário — a campanha dispara sozinha, sem precisar clicar em nada (só precisa o programa estar aberto no horário).
+- **Blacklist automática**: e-mail que não existe (bounce) e resposta negativa recebida no WhatsApp ("não quero mais", "remove", etc.) entram sozinhos na lista de bloqueados — sem precisar de ninguém cadastrando na mão. Também dá pra adicionar manualmente.
 - Uma única planilha (`contatos.xlsx`) alimenta os dois canais — com botões para baixar o modelo e enviar a planilha preenchida direto pela página.
 - Suporta personalização com `{{nome}}`, e até mensagens diferentes por pessoa.
 - Acesso protegido por usuário e senha (configurado na primeira vez, pelo próprio navegador).
@@ -39,7 +42,7 @@ Preencha e clique em "Salvar e começar a usar". Isso substitui a necessidade de
 2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
 3. Crie uma nova senha de app — o Google gera um código de 16 letras, é esse código que vai no painel
 
-Se quiser cadastrar **mais de uma conta Gmail** (pra rotação automática caso uma seja bloqueada), configure a primeira pela tela inicial e adicione as demais editando o arquivo `.env` depois, seguindo o padrão `GMAIL_USER_2` / `GMAIL_APP_PASSWORD_2`, `GMAIL_USER_3` / `GMAIL_APP_PASSWORD_3`, etc. (veja `.env.example`). Esse `.env` fica em `%APPDATA%\painel-envio-mensagens\.env` — não dentro da pasta onde o programa foi instalado.
+Se quiser cadastrar **mais contas de e-mail** (pra rotação automática caso uma seja bloqueada, ou de outros provedores como Outlook/Zoho/Hostinger/GoDaddy), use a aba **"🖧 Servidores"** dentro do painel — não precisa mais editar arquivo nenhum na mão. Lá também dá pra testar a conexão de cada conta com um clique antes de usar numa campanha de verdade.
 
 ### Preparar a planilha de contatos
 Direto na página do painel, no topo: **"⬇️ Baixar planilha modelo"** pra pegar o modelo já formatado, preencha, e **"📤 Enviar planilha preenchida"** pra carregar de volta.
@@ -62,12 +65,21 @@ Na aba WhatsApp, um QR Code aparece direto na página — escaneie com **WhatsAp
 - No WhatsApp: contato único, grupo (cole o ID — veja `bot-cronograma-diario/capturar-id-grupo.js` de outro projeto se precisar descobrir o ID de um grupo nosso), ou lista da planilha
 - Escreva a mensagem e clique em enviar
 
+Todo envio feito por aqui (mesmo o avulso) já fica registrado como uma campanha, com o resultado de cada contato salvo — veja a aba **"📣 Campanhas"**.
+
+### Campanhas, agendamento e blacklist
+- **Aba "📣 Campanhas"**: crie uma campanha com nome, canal, mensagem e (opcional) dias da semana + horário pra ela disparar sozinha. Cada campanha mostra quantos contatos foram enviados, deram erro, foram bloqueados pela blacklist, e (quando o rastreamento estiver configurado) quantos abriram/clicaram.
+  - **Importante sobre agendamento**: a campanha só dispara enquanto o programa estiver aberto no computador, no horário marcado — não é um serviço na nuvem rodando 24h. Se o computador estiver desligado na hora, ela dispara na próxima vez que o programa abrir naquele dia (ou só no próximo dia marcado, se já tiver passado da hora).
+- **Aba "🖧 Servidores"**: cadastre quantas contas de e-mail quiser, de qualquer provedor suportado, e teste a conexão antes de usar.
+- **Aba "🚫 Blacklist"**: veja quem está bloqueado e por quê (bounce, resposta no WhatsApp, ou manual), remova alguém se precisar, ou adicione manualmente.
+
 ## Arquivos do projeto (resumo)
 - `main.js` — processo principal do programa (abre a janela, garante que fecha direito e que não abre em dobro)
-- `server.js` — o painel em si (rotas, envio de WhatsApp/e-mail, planilha de contatos)
+- `server.js` — o painel em si (rotas, envio de WhatsApp/e-mail, campanhas, agendamento, blacklist)
+- `db.js` — banco de dados local (SQLite) com campanhas, log de envios, eventos e blacklist
 - `public/` — a interface (HTML/CSS/JS) que aparece na janela
-- `.env.example` — referência para quem quiser cadastrar mais de uma conta Gmail manualmente
-- Os dados de cada instalação (`.env`, `contatos.xlsx`, `controle-remetentes.json`, sessão do WhatsApp) ficam guardados na pasta de perfil do Windows, fora da pasta do programa — sobrevivem a uma reinstalação do instalador.
+- `.env.example` — referência do arquivo `.env` (hoje só guarda usuário/senha do painel; contas de e-mail ficam no banco de dados, cadastradas pela aba Servidores)
+- Os dados de cada instalação (`.env`, `contatos.xlsx`, `painel.db`, sessão do WhatsApp) ficam guardados na pasta de perfil do Windows, fora da pasta do programa — sobrevivem a uma reinstalação do instalador.
 
 ## Cuidados
 - **Ritmo de envio**: o WhatsApp em lista espera de 8 a 15 segundos entre mensagens, pra evitar bloqueio. O e-mail espera 2 segundos entre cada envio.

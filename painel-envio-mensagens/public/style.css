@@ -169,3 +169,68 @@ input[type="text"], textarea {
 }
 .resultado li.erro { color: var(--vermelho); }
 .resultado li.enviado { color: var(--verde); }
+
+/* ---------- Navegação entre páginas (Envio rápido / Campanhas / etc.) ---------- */
+.paginas-tabs { margin-bottom: 24px; flex-wrap: wrap; }
+.paginas-tabs .tab { flex: 1 1 auto; font-size: 12px; padding: 8px 6px; }
+
+/* ---------- Listas (campanhas, servidores, blacklist) ---------- */
+.lista-itens { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.item-lista {
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+.item-lista-topo { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.item-lista-nome { font-weight: 600; }
+.item-lista-info { color: var(--cinza); font-size: 12px; margin: 2px 0; }
+.item-lista-acoes { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.item-lista-acoes button {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--borda);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+.item-lista-acoes button.acao-perigo { color: var(--vermelho); border-color: var(--vermelho); }
+.item-lista-acoes button.acao-primaria { color: var(--azul); border-color: var(--azul); }
+.item-lista-vazia { color: var(--cinza); font-size: 13px; text-align: center; padding: 12px 0; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge-sucesso { background: #e5f6ea; color: var(--verde); }
+.badge-erro { background: #fbeaea; color: var(--vermelho); }
+.badge-aviso { background: #fff4e0; color: #a35b00; }
+.badge-neutro { background: var(--azul-claro); color: var(--azul); }
+
+.dias-semana { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; margin-bottom: 10px; }
+.dias-semana label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-weight: normal;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+}

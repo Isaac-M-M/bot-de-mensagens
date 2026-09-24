@@ -14,74 +14,204 @@
       <p class="subtitle">Escolha o canal, escreva a mensagem e envie.</p>
     </header>
 
-    <!-- Seção de contatos: baixar modelo e enviar planilha preenchida -->
-    <div class="contatos-box">
-      <h3>📋 Planilha de contatos</h3>
-      <div class="contatos-linha">
-        <a id="btn-baixar-modelo" href="/contatos/modelo" class="btn-secundario" download>⬇️ Baixar planilha modelo</a>
-      </div>
-      <div class="contatos-linha">
-        <label for="input-planilha" class="btn-secundario btn-upload-label">📤 Enviar planilha preenchida</label>
-        <input type="file" id="input-planilha" accept=".xlsx" class="hidden" />
-      </div>
-      <p id="contatos-status" class="info-msg">Verificando planilha...</p>
+    <!-- Navegação entre páginas -->
+    <div class="tabs paginas-tabs">
+      <button class="tab pagina-tab active" data-pagina="envio-rapido">⚡ Envio rápido</button>
+      <button class="tab pagina-tab" data-pagina="campanhas">📣 Campanhas</button>
+      <button class="tab pagina-tab" data-pagina="servidores">🖧 Servidores</button>
+      <button class="tab pagina-tab" data-pagina="blacklist">🚫 Blacklist</button>
     </div>
 
-    <!-- Seletor de canal -->
-    <div class="tabs">
-      <button class="tab active" data-canal="whatsapp">💬 WhatsApp</button>
-      <button class="tab" data-canal="email">📧 E-mail</button>
+    <!-- ==================== PÁGINA: ENVIO RÁPIDO ==================== -->
+    <div id="pagina-envio-rapido" class="pagina">
+      <!-- Seção de contatos: baixar modelo e enviar planilha preenchida -->
+      <div class="contatos-box">
+        <h3>📋 Planilha de contatos</h3>
+        <div class="contatos-linha">
+          <a id="btn-baixar-modelo" href="/contatos/modelo" class="btn-secundario" download>⬇️ Baixar planilha modelo</a>
+        </div>
+        <div class="contatos-linha">
+          <label for="input-planilha" class="btn-secundario btn-upload-label">📤 Enviar planilha preenchida</label>
+          <input type="file" id="input-planilha" accept=".xlsx" class="hidden" />
+        </div>
+        <p id="contatos-status" class="info-msg">Verificando planilha...</p>
+      </div>
+
+      <!-- Seletor de canal -->
+      <div class="tabs">
+        <button class="tab active" data-canal="whatsapp">💬 WhatsApp</button>
+        <button class="tab" data-canal="email">📧 E-mail</button>
+      </div>
+
+      <!-- Status do WhatsApp -->
+      <div id="whatsapp-status-box" class="status-box">
+        <div id="wa-carregando">Verificando conexão do WhatsApp...</div>
+        <div id="wa-qr" class="hidden">
+          <p>Escaneie o QR Code com o WhatsApp do celular:</p>
+          <img id="wa-qr-img" alt="QR Code" />
+        </div>
+        <div id="wa-conectado" class="hidden success-msg">✅ WhatsApp conectado</div>
+      </div>
+
+      <!-- Formulário WhatsApp -->
+      <form id="form-whatsapp" class="form-canal">
+        <label>Enviar para:</label>
+        <div class="radio-group">
+          <label><input type="radio" name="tipoDestino" value="unico" checked /> Contato único</label>
+          <label><input type="radio" name="tipoDestino" value="grupo" /> Grupo</label>
+          <label><input type="radio" name="tipoDestino" value="planilha" /> Lista da planilha</label>
+        </div>
+
+        <div id="campo-destino">
+          <label for="destino-wa">Número (com DDD) ou ID do grupo:</label>
+          <input type="text" id="destino-wa" name="destino" placeholder="Ex: 6199973622 ou 12036...@g.us" />
+        </div>
+
+        <label for="mensagem-wa">Mensagem padrão:</label>
+        <textarea id="mensagem-wa" name="mensagem" rows="8" placeholder="Escreva a mensagem padrão aqui. Use {{nome}} para personalizar."></textarea>
+        <p class="info-msg" id="aviso-msg-individual">💡 Na planilha, você pode adicionar uma coluna <code>mensagem</code>: quem tiver ela preenchida recebe esse texto no lugar do padrão acima — assim dá pra mandar mensagens diferentes pra pessoas diferentes na mesma lista.</p>
+
+        <button type="submit" class="btn-enviar">Enviar pelo WhatsApp</button>
+      </form>
+
+      <!-- Formulário E-mail -->
+      <form id="form-email" class="form-canal hidden">
+        <p class="info-msg">O e-mail sempre é enviado para todos os contatos com e-mail preenchido em <code>contatos.xlsx</code>.</p>
+
+        <label for="assunto-email">Assunto:</label>
+        <input type="text" id="assunto-email" name="assunto" placeholder="Assunto do e-mail" />
+
+        <label for="mensagem-email">Mensagem padrão:</label>
+        <textarea id="mensagem-email" name="mensagem" rows="8" placeholder="Escreva a mensagem padrão aqui. Use {{nome}} para personalizar."></textarea>
+        <p class="info-msg">💡 Se a planilha tiver uma coluna <code>mensagem</code> preenchida pra alguém, esse texto é usado no lugar do padrão acima.</p>
+
+        <button type="submit" class="btn-enviar">Enviar por E-mail</button>
+      </form>
+
+      <!-- Resultado do envio -->
+      <div id="resultado" class="resultado hidden">
+        <h3>Resultado do envio</h3>
+        <ul id="resultado-lista"></ul>
+      </div>
     </div>
 
-    <!-- Status do WhatsApp -->
-    <div id="whatsapp-status-box" class="status-box">
-      <div id="wa-carregando">Verificando conexão do WhatsApp...</div>
-      <div id="wa-qr" class="hidden">
-        <p>Escaneie o QR Code com o WhatsApp do celular:</p>
-        <img id="wa-qr-img" alt="QR Code" />
+    <!-- ==================== PÁGINA: CAMPANHAS ==================== -->
+    <div id="pagina-campanhas" class="pagina hidden">
+      <div class="contatos-box">
+        <h3>➕ Nova campanha</h3>
+
+        <label for="campanha-nome">Nome da campanha:</label>
+        <input type="text" id="campanha-nome" placeholder="Ex: Prospecção DF - Outubro" />
+
+        <label>Canal:</label>
+        <div class="radio-group">
+          <label><input type="radio" name="campanha-canal" value="whatsapp" checked /> WhatsApp</label>
+          <label><input type="radio" name="campanha-canal" value="email" /> E-mail</label>
+        </div>
+
+        <div id="campanha-campos-whatsapp">
+          <label>Enviar para:</label>
+          <div class="radio-group">
+            <label><input type="radio" name="campanha-tipo-destino" value="unico" checked /> Contato único</label>
+            <label><input type="radio" name="campanha-tipo-destino" value="grupo" /> Grupo</label>
+            <label><input type="radio" name="campanha-tipo-destino" value="planilha" /> Lista da planilha</label>
+          </div>
+          <div id="campanha-campo-destino">
+            <label for="campanha-destino">Número (com DDD) ou ID do grupo:</label>
+            <input type="text" id="campanha-destino" placeholder="Ex: 6199973622 ou 12036...@g.us" />
+          </div>
+        </div>
+
+        <div id="campanha-campos-email" class="hidden">
+          <label for="campanha-assunto">Assunto:</label>
+          <input type="text" id="campanha-assunto" placeholder="Assunto do e-mail" />
+
+          <label for="campanha-servidor">Servidor de e-mail:</label>
+          <select id="campanha-servidor">
+            <option value="">Rotação entre todos os ativos</option>
+          </select>
+        </div>
+
+        <label for="campanha-mensagem">Mensagem:</label>
+        <textarea id="campanha-mensagem" rows="6" placeholder="Use {{nome}} para personalizar."></textarea>
+
+        <label>Agendamento (opcional):</label>
+        <div class="dias-semana">
+          <label><input type="checkbox" class="campanha-dia" value="0" /> Dom</label>
+          <label><input type="checkbox" class="campanha-dia" value="1" /> Seg</label>
+          <label><input type="checkbox" class="campanha-dia" value="2" /> Ter</label>
+          <label><input type="checkbox" class="campanha-dia" value="3" /> Qua</label>
+          <label><input type="checkbox" class="campanha-dia" value="4" /> Qui</label>
+          <label><input type="checkbox" class="campanha-dia" value="5" /> Sex</label>
+          <label><input type="checkbox" class="campanha-dia" value="6" /> Sáb</label>
+        </div>
+        <input type="time" id="campanha-hora" />
+        <p class="info-msg">💡 Marcando dias e horário, a campanha dispara sozinha todo dia marcado (com o programa aberto). Sem isso, ela fica salva pra você enviar quando quiser.</p>
+
+        <button type="button" id="btn-criar-campanha" class="btn-enviar">Salvar campanha</button>
+        <p id="campanha-erro" class="hidden" style="color:#c0392b; font-size:13px; margin-top:10px;"></p>
       </div>
-      <div id="wa-conectado" class="hidden success-msg">✅ WhatsApp conectado</div>
+
+      <div class="contatos-box">
+        <h3>📋 Campanhas salvas</h3>
+        <ul id="lista-campanhas" class="lista-itens"></ul>
+      </div>
     </div>
 
-    <!-- Formulário WhatsApp -->
-    <form id="form-whatsapp" class="form-canal">
-      <label>Enviar para:</label>
-      <div class="radio-group">
-        <label><input type="radio" name="tipoDestino" value="unico" checked /> Contato único</label>
-        <label><input type="radio" name="tipoDestino" value="grupo" /> Grupo</label>
-        <label><input type="radio" name="tipoDestino" value="planilha" /> Lista da planilha</label>
+    <!-- ==================== PÁGINA: SERVIDORES DE E-MAIL ==================== -->
+    <div id="pagina-servidores" class="pagina hidden">
+      <div class="contatos-box">
+        <h3>➕ Novo servidor de e-mail</h3>
+
+        <label for="servidor-apelido">Apelido:</label>
+        <input type="text" id="servidor-apelido" placeholder="Ex: Comercial" />
+
+        <label for="servidor-provedor">Provedor:</label>
+        <select id="servidor-provedor">
+          <option value="gmail">Gmail</option>
+          <option value="outlook">Outlook / Office 365</option>
+          <option value="zoho">Zoho</option>
+          <option value="hostinger">Hostinger</option>
+          <option value="godaddy">GoDaddy</option>
+          <option value="custom">SMTP personalizado</option>
+        </select>
+
+        <div id="servidor-campos-custom" class="hidden">
+          <label for="servidor-host">Host SMTP:</label>
+          <input type="text" id="servidor-host" placeholder="smtp.exemplo.com" />
+          <label for="servidor-porta">Porta:</label>
+          <input type="text" id="servidor-porta" placeholder="465" />
+        </div>
+
+        <label for="servidor-usuario">E-mail:</label>
+        <input type="text" id="servidor-usuario" placeholder="conta@exemplo.com" />
+
+        <label for="servidor-senha">Senha (ou senha de app):</label>
+        <input type="text" id="servidor-senha" placeholder="Senha de app" />
+
+        <button type="button" id="btn-criar-servidor" class="btn-enviar">Adicionar servidor</button>
+        <p id="servidor-erro" class="hidden" style="color:#c0392b; font-size:13px; margin-top:10px;"></p>
       </div>
 
-      <div id="campo-destino">
-        <label for="destino-wa">Número (com DDD) ou ID do grupo:</label>
-        <input type="text" id="destino-wa" name="destino" placeholder="Ex: 6199973622 ou 12036...@g.us" />
+      <div class="contatos-box">
+        <h3>🖧 Servidores cadastrados</h3>
+        <ul id="lista-servidores" class="lista-itens"></ul>
+      </div>
+    </div>
+
+    <!-- ==================== PÁGINA: BLACKLIST ==================== -->
+    <div id="pagina-blacklist" class="pagina hidden">
+      <div class="contatos-box">
+        <p class="info-msg">A blacklist é alimentada automaticamente: e-mail que não existe (bounce) e resposta negativa recebida no WhatsApp entram sozinhos aqui. Também dá pra adicionar manualmente.</p>
+        <label for="blacklist-valor">Adicionar e-mail ou telefone:</label>
+        <input type="text" id="blacklist-valor" placeholder="email@exemplo.com ou 61999998888" />
+        <button type="button" id="btn-adicionar-blacklist" class="btn-secundario" style="margin-top:10px;">Adicionar</button>
       </div>
 
-      <label for="mensagem-wa">Mensagem padrão:</label>
-      <textarea id="mensagem-wa" name="mensagem" rows="8" placeholder="Escreva a mensagem padrão aqui. Use {{nome}} para personalizar."></textarea>
-      <p class="info-msg" id="aviso-msg-individual">💡 Na planilha, você pode adicionar uma coluna <code>mensagem</code>: quem tiver ela preenchida recebe esse texto no lugar do padrão acima — assim dá pra mandar mensagens diferentes pra pessoas diferentes na mesma lista.</p>
-
-      <button type="submit" class="btn-enviar">Enviar pelo WhatsApp</button>
-    </form>
-
-    <!-- Formulário E-mail -->
-    <form id="form-email" class="form-canal hidden">
-      <p class="info-msg">O e-mail sempre é enviado para todos os contatos com e-mail preenchido em <code>contatos.xlsx</code>.</p>
-
-      <label for="assunto-email">Assunto:</label>
-      <input type="text" id="assunto-email" name="assunto" placeholder="Assunto do e-mail" />
-
-      <label for="mensagem-email">Mensagem padrão:</label>
-      <textarea id="mensagem-email" name="mensagem" rows="8" placeholder="Escreva a mensagem padrão aqui. Use {{nome}} para personalizar."></textarea>
-      <p class="info-msg">💡 Se a planilha tiver uma coluna <code>mensagem</code> preenchida pra alguém, esse texto é usado no lugar do padrão acima.</p>
-
-      <button type="submit" class="btn-enviar">Enviar por E-mail</button>
-    </form>
-
-    <!-- Resultado do envio -->
-    <div id="resultado" class="resultado hidden">
-      <h3>Resultado do envio</h3>
-      <ul id="resultado-lista"></ul>
+      <div class="contatos-box">
+        <h3>🚫 Contatos bloqueados</h3>
+        <ul id="lista-blacklist" class="lista-itens"></ul>
+      </div>
     </div>
   </div>
 
