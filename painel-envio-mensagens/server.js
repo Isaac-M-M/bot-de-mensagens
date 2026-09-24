@@ -947,6 +947,50 @@ function iniciarServidor({ dataDir, porta }) {
       });
     });
 
+    function textoStatusEnvio(status) {
+      if (status === "enviado") return "Enviado";
+      if (status === "bloqueado_blacklist") return "Bloqueado (blacklist)";
+      return "Erro";
+    }
+
+    function formatarDataHoraRelatorio(criadoEm) {
+      if (!criadoEm) return "";
+      const data = new Date(criadoEm.includes("T") ? criadoEm : criadoEm.replace(" ", "T") + "Z");
+      if (Number.isNaN(data.getTime())) return criadoEm;
+      return data.toLocaleString("pt-BR");
+    }
+
+    app.get("/api/campanhas/:id/relatorio.xlsx", (req, res) => {
+      const campanha = db.obterCampanha(Number(req.params.id));
+      if (!campanha) return res.status(404).json({ erro: "Campanha não encontrada." });
+      const envios = db.listarEnviosDaCampanha(campanha.id);
+
+      const linhas = envios.map((e) => ({
+        Contato: e.nome_contato || "",
+        Destino: e.destino,
+        Canal: e.canal === "whatsapp" ? "WhatsApp" : "E-mail",
+        Status: textoStatusEnvio(e.status),
+        Detalhe: e.detalhe || "",
+        "Data/hora": formatarDataHoraRelatorio(e.criado_em),
+      }));
+
+      const planilha = xlsx.utils.json_to_sheet(linhas);
+      planilha["!cols"] = [{ wch: 22 }, { wch: 28 }, { wch: 10 }, { wch: 20 }, { wch: 40 }, { wch: 20 }];
+      const workbook = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(workbook, planilha, "Envios");
+      const buffer = xlsx.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+      const nomeBase =
+        (campanha.nome || "campanha")
+          .normalize("NFD")
+          .replace(/[̀-ͯ]/g, "") // remove acentos (mantendo a letra base) pra não corromper o header
+          .replace(/[^\w\- ]/g, "")
+          .trim() || "campanha";
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.attachment(`${nomeBase}-relatorio.xlsx`);
+      res.send(buffer);
+    });
+
     app.post("/api/campanhas", (req, res) => {
       const { nome, canal, tipoDestino, destino, assunto, mensagem, servidorEmailId, agendamentoDias, agendamentoHora } = req.body || {};
       if (!nome || !nome.trim()) return res.status(400).json({ erro: "Dê um nome pra campanha." });

@@ -290,6 +290,7 @@ async function carregarCampanhas() {
           <button type="button" class="acao-primaria" data-enviar="${c.id}">Enviar agora</button>
           <button type="button" data-editar="${c.id}">Editar</button>
           <button type="button" data-detalhes="${c.id}">Ver detalhes</button>
+          <a href="/api/campanhas/${c.id}/relatorio.xlsx" download class="btn-link-acao">⬇️ Relatório (Excel)</a>
           <button type="button" class="acao-perigo" data-excluir="${c.id}">Excluir</button>
         </div>
         <div class="detalhes-campanha hidden" data-detalhes-container="${c.id}"></div>
