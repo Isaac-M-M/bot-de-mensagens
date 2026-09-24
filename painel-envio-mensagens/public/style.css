@@ -234,3 +234,13 @@ select {
   font-family: inherit;
   background: #fff;
 }
+
+/* ---------- Tabela de detalhes por envio (log estilo planilha) ---------- */
+.detalhes-campanha { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borda); }
+.tabela-scroll { overflow-x: auto; border: 1px solid var(--borda); border-radius: 6px; }
+.tabela-detalhes { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.tabela-detalhes th, .tabela-detalhes td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+.tabela-detalhes th { background: var(--azul-claro); color: var(--azul); position: sticky; top: 0; }
+.tabela-detalhes tbody tr:last-child td { border-bottom: none; }
+.tabela-detalhes tr.linha-erro td { background: #fdf3f2; }
+.tabela-detalhes tr.linha-aviso td { background: #fffaf0; }
