@@ -354,7 +354,7 @@ function sairModoEdicaoCampanha() {
 
 document.getElementById("btn-cancelar-edicao-campanha").addEventListener("click", sairModoEdicaoCampanha);
 
-const enviosPorCampanha = {}; // cache local: id da campanha -> lista de envios (pra tabela de detalhes e exportação)
+const enviosPorCampanha = {}; // cache local: id da campanha -> lista de envios (pra tabela de detalhes)
 
 async function carregarResumoCampanha(id) {
   const alvo = document.querySelector(`[data-resumo="${id}"]`);
