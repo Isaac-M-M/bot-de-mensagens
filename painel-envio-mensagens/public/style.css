@@ -197,6 +197,19 @@ input[type="text"], textarea {
 }
 .item-lista-acoes button.acao-perigo { color: var(--vermelho); border-color: var(--vermelho); }
 .item-lista-acoes button.acao-primaria { color: var(--azul); border-color: var(--azul); }
+.item-lista-acoes .btn-link-acao {
+  display: inline-block;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--borda);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--azul);
+  border-color: var(--azul);
+  text-decoration: none;
+}
 .item-lista-vazia { color: var(--cinza); font-size: 13px; text-align: center; padding: 12px 0; }
 
 .badge {
