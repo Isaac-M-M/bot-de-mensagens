@@ -289,8 +289,10 @@ async function carregarCampanhas() {
         <div class="item-lista-acoes">
           <button type="button" class="acao-primaria" data-enviar="${c.id}">Enviar agora</button>
           <button type="button" data-editar="${c.id}">Editar</button>
+          <button type="button" data-detalhes="${c.id}">Ver detalhes</button>
           <button type="button" class="acao-perigo" data-excluir="${c.id}">Excluir</button>
         </div>
+        <div class="detalhes-campanha hidden" data-detalhes-container="${c.id}"></div>
       `;
       lista.appendChild(li);
       carregarResumoCampanha(c.id);
@@ -352,6 +354,8 @@ function sairModoEdicaoCampanha() {
 
 document.getElementById("btn-cancelar-edicao-campanha").addEventListener("click", sairModoEdicaoCampanha);
 
+const enviosPorCampanha = {}; // cache local: id da campanha -> lista de envios (pra tabela de detalhes)
+
 async function carregarResumoCampanha(id) {
   const alvo = document.querySelector(`[data-resumo="${id}"]`);
   if (!alvo) return;
@@ -359,16 +363,86 @@ async function carregarResumoCampanha(id) {
     const res = await fetch(`/api/campanhas/${id}`);
     const data = await res.json();
     const r = data.resumo || {};
+    enviosPorCampanha[id] = data.envios || [];
     alvo.textContent = `✅ ${r.enviado || 0} enviados · ❌ ${r.erro || 0} erros · 🚫 ${r.bloqueado_blacklist || 0} bloqueados · 👁️ ${r.aberturas || 0} aberturas · 🔗 ${r.cliques || 0} cliques`;
   } catch {
     alvo.textContent = "Não consegui carregar os resultados.";
   }
 }
 
+function classeStatusEnvio(status) {
+  if (status === "enviado") return "sucesso";
+  if (status === "bloqueado_blacklist") return "aviso";
+  return "erro";
+}
+
+function textoStatusEnvio(status) {
+  const mapa = { enviado: "Enviado", bloqueado_blacklist: "Bloqueado (blacklist)" };
+  return mapa[status] || "Erro";
+}
+
+function formatarDataHora(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("pt-BR");
+}
+
+function renderizarTabelaDetalhes(id) {
+  const container = document.querySelector(`[data-detalhes-container="${id}"]`);
+  if (!container) return;
+  const envios = enviosPorCampanha[id] || [];
+
+  if (envios.length === 0) {
+    container.innerHTML = '<p class="item-lista-info">Ainda não há nenhum envio registrado nessa campanha.</p>';
+    return;
+  }
+
+  const linhas = envios
+    .map(
+      (e) => `
+        <tr class="linha-${classeStatusEnvio(e.status)}">
+          <td>${escaparHtml(e.nome_contato || "-")}</td>
+          <td>${escaparHtml(e.destino)}</td>
+          <td><span class="badge badge-${classeStatusEnvio(e.status) === "sucesso" ? "sucesso" : classeStatusEnvio(e.status) === "aviso" ? "aviso" : "erro"}">${textoStatusEnvio(e.status)}</span></td>
+          <td>${escaparHtml(e.detalhe || "-")}</td>
+          <td>${formatarDataHora(e.criado_em)}</td>
+        </tr>`
+    )
+    .join("");
+
+  container.innerHTML = `
+    <p class="item-lista-info">${envios.length} envio(s) registrado(s)</p>
+    <div class="tabela-scroll">
+      <table class="tabela-detalhes">
+        <thead>
+          <tr><th>Contato</th><th>Destino</th><th>Status</th><th>Detalhe</th><th>Quando</th></tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 document.getElementById("lista-campanhas").addEventListener("click", async (e) => {
   const idEnviar = e.target.dataset.enviar;
   const idExcluir = e.target.dataset.excluir;
   const idEditar = e.target.dataset.editar;
+  const idDetalhes = e.target.dataset.detalhes;
+
+  if (idDetalhes) {
+    const container = document.querySelector(`[data-detalhes-container="${idDetalhes}"]`);
+    const aberto = !container.classList.contains("hidden");
+    if (aberto) {
+      container.classList.add("hidden");
+      e.target.textContent = "Ver detalhes";
+    } else {
+      renderizarTabelaDetalhes(idDetalhes);
+      container.classList.remove("hidden");
+      e.target.textContent = "Ocultar detalhes";
+    }
+    return;
+  }
 
   if (idEnviar) {
     e.target.disabled = true;
