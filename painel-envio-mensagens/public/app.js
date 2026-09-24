@@ -288,6 +288,7 @@ async function carregarCampanhas() {
         <p class="item-lista-info" data-resumo="${c.id}">Carregando resultados...</p>
         <div class="item-lista-acoes">
           <button type="button" class="acao-primaria" data-enviar="${c.id}">Enviar agora</button>
+          <button type="button" data-editar="${c.id}">Editar</button>
           <button type="button" class="acao-perigo" data-excluir="${c.id}">Excluir</button>
         </div>
       `;
@@ -298,6 +299,58 @@ async function carregarCampanhas() {
     lista.innerHTML = `<li class="item-lista-vazia">Erro ao carregar campanhas: ${escaparHtml(err.message)}</li>`;
   }
 }
+
+// ---------- Editar campanha existente ----------
+let campanhaEditandoId = null;
+
+function preencherFormularioCampanha(c) {
+  document.getElementById("campanha-nome").value = c.nome;
+  const radioCanal = document.querySelector(`input[name="campanha-canal"][value="${c.canal}"]`);
+  radioCanal.checked = true;
+  radioCanal.dispatchEvent(new Event("change"));
+  document.getElementById("campanha-mensagem").value = c.mensagem;
+
+  if (c.canal === "whatsapp") {
+    if (c.tipo_destino) {
+      const radioTipo = document.querySelector(`input[name="campanha-tipo-destino"][value="${c.tipo_destino}"]`);
+      if (radioTipo) {
+        radioTipo.checked = true;
+        radioTipo.dispatchEvent(new Event("change"));
+      }
+    }
+    document.getElementById("campanha-destino").value = c.destino || "";
+  } else {
+    document.getElementById("campanha-assunto").value = c.assunto || "";
+    if (c.servidor_email_id) document.getElementById("campanha-servidor").value = c.servidor_email_id;
+  }
+
+  document.querySelectorAll(".campanha-dia").forEach((chk) => (chk.checked = false));
+  if (c.agendamento_dias) {
+    JSON.parse(c.agendamento_dias).forEach((d) => {
+      const chk = document.querySelector(`.campanha-dia[value="${d}"]`);
+      if (chk) chk.checked = true;
+    });
+  }
+  document.getElementById("campanha-hora").value = c.agendamento_hora || "";
+}
+
+function limparFormularioCampanha() {
+  document.getElementById("campanha-nome").value = "";
+  document.getElementById("campanha-mensagem").value = "";
+  document.getElementById("campanha-destino").value = "";
+  document.getElementById("campanha-assunto").value = "";
+  document.getElementById("campanha-hora").value = "";
+  document.querySelectorAll(".campanha-dia").forEach((c) => (c.checked = false));
+}
+
+function sairModoEdicaoCampanha() {
+  campanhaEditandoId = null;
+  document.getElementById("btn-criar-campanha").textContent = "Salvar campanha";
+  document.getElementById("btn-cancelar-edicao-campanha").classList.add("hidden");
+  limparFormularioCampanha();
+}
+
+document.getElementById("btn-cancelar-edicao-campanha").addEventListener("click", sairModoEdicaoCampanha);
 
 async function carregarResumoCampanha(id) {
   const alvo = document.querySelector(`[data-resumo="${id}"]`);
@@ -315,6 +368,7 @@ async function carregarResumoCampanha(id) {
 document.getElementById("lista-campanhas").addEventListener("click", async (e) => {
   const idEnviar = e.target.dataset.enviar;
   const idExcluir = e.target.dataset.excluir;
+  const idEditar = e.target.dataset.editar;
 
   if (idEnviar) {
     e.target.disabled = true;
@@ -332,7 +386,21 @@ document.getElementById("lista-campanhas").addEventListener("click", async (e) =
   } else if (idExcluir) {
     if (!confirm("Excluir essa campanha e o histórico de envios dela?")) return;
     await fetch(`/api/campanhas/${idExcluir}`, { method: "DELETE" });
+    if (campanhaEditandoId === Number(idExcluir)) sairModoEdicaoCampanha();
     carregarCampanhas();
+  } else if (idEditar) {
+    try {
+      const res = await fetch(`/api/campanhas/${idEditar}`);
+      const data = await res.json();
+      if (data.erro) return alert(`Erro ao carregar campanha: ${data.erro}`);
+      campanhaEditandoId = Number(idEditar);
+      preencherFormularioCampanha(data.campanha);
+      document.getElementById("btn-criar-campanha").textContent = "Salvar alterações";
+      document.getElementById("btn-cancelar-edicao-campanha").classList.remove("hidden");
+      document.getElementById("campanha-nome").scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (err) {
+      alert(`Erro ao carregar campanha: ${err.message}`);
+    }
   }
 });
 
@@ -363,9 +431,13 @@ document.getElementById("btn-criar-campanha").addEventListener("click", async ()
     if (servidorId) corpo.servidorEmailId = Number(servidorId);
   }
 
+  const editando = Boolean(campanhaEditandoId);
+  const url = editando ? `/api/campanhas/${campanhaEditandoId}` : "/api/campanhas";
+  const metodo = editando ? "PUT" : "POST";
+
   try {
-    const res = await fetch("/api/campanhas", {
-      method: "POST",
+    const res = await fetch(url, {
+      method: metodo,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
     });
@@ -375,12 +447,8 @@ document.getElementById("btn-criar-campanha").addEventListener("click", async ()
       erroEl.classList.remove("hidden");
       return;
     }
-    document.getElementById("campanha-nome").value = "";
-    document.getElementById("campanha-mensagem").value = "";
-    document.getElementById("campanha-destino").value = "";
-    document.getElementById("campanha-assunto").value = "";
-    document.getElementById("campanha-hora").value = "";
-    document.querySelectorAll(".campanha-dia").forEach((c) => (c.checked = false));
+    if (editando) sairModoEdicaoCampanha();
+    else limparFormularioCampanha();
     carregarCampanhas();
   } catch (err) {
     erroEl.textContent = `❌ Erro ao salvar: ${err.message}`;

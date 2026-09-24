@@ -7,7 +7,7 @@ Interface web local: você escreve a mensagem, escolhe o canal e envia — sem p
 - **E-mail**: manda pra todos os contatos com e-mail preenchido na planilha, com rotação automática entre várias contas — **Gmail, Outlook, Zoho, Hostinger, GoDaddy ou qualquer SMTP customizado**.
 - **Campanhas**: em vez de só um envio avulso, dá pra criar, salvar e reenviar campanhas nomeadas — com histórico de quantos foram entregues, deram erro ou foram bloqueados.
 - **Agendamento**: escolha dias da semana e um horário — a campanha dispara sozinha, sem precisar clicar em nada (só precisa o programa estar aberto no horário).
-- **Blacklist automática**: e-mail que não existe (bounce) e resposta negativa recebida no WhatsApp ("não quero mais", "remove", etc.) entram sozinhos na lista de bloqueados — sem precisar de ninguém cadastrando na mão. Também dá pra adicionar manualmente.
+- **Blacklist automática**: e-mail que não existe (bounce), resposta negativa recebida no WhatsApp e resposta negativa recebida por e-mail (checado a cada 5 minutos, só nos provedores conhecidos — não em SMTP customizado) entram sozinhos na lista de bloqueados — sem precisar de ninguém cadastrando na mão. Também dá pra adicionar manualmente.
 - Uma única planilha (`contatos.xlsx`) alimenta os dois canais — com botões para baixar o modelo e enviar a planilha preenchida direto pela página.
 - Suporta personalização com `{{nome}}`, e até mensagens diferentes por pessoa.
 - Acesso protegido por usuário e senha (configurado na primeira vez, pelo próprio navegador).
@@ -68,7 +68,7 @@ Na aba WhatsApp, um QR Code aparece direto na página — escaneie com **WhatsAp
 Todo envio feito por aqui (mesmo o avulso) já fica registrado como uma campanha, com o resultado de cada contato salvo — veja a aba **"📣 Campanhas"**.
 
 ### Campanhas, agendamento e blacklist
-- **Aba "📣 Campanhas"**: crie uma campanha com nome, canal, mensagem e (opcional) dias da semana + horário pra ela disparar sozinha. Cada campanha mostra quantos contatos foram enviados, deram erro, foram bloqueados pela blacklist, e (quando o rastreamento estiver configurado) quantos abriram/clicaram.
+- **Aba "📣 Campanhas"**: crie uma campanha com nome, canal, mensagem e (opcional) dias da semana + horário pra ela disparar sozinha. Uma campanha salva pode ser editada a qualquer momento (botão "Editar"), reenviada quando quiser, ou excluída. Cada campanha mostra quantos contatos foram enviados, deram erro, foram bloqueados pela blacklist, e (quando o rastreamento estiver configurado) quantos abriram/clicaram.
   - **Importante sobre agendamento**: a campanha só dispara enquanto o programa estiver aberto no computador, no horário marcado — não é um serviço na nuvem rodando 24h. Se o computador estiver desligado na hora, ela dispara na próxima vez que o programa abrir naquele dia (ou só no próximo dia marcado, se já tiver passado da hora).
 - **Aba "🖧 Servidores"**: cadastre quantas contas de e-mail quiser, de qualquer provedor suportado, e teste a conexão antes de usar.
 - **Aba "🚫 Blacklist"**: veja quem está bloqueado e por quê (bounce, resposta no WhatsApp, ou manual), remova alguém se precisar, ou adicione manualmente.
