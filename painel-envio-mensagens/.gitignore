@@ -7,6 +7,9 @@ node_modules/
 contatos.xlsx
 controle-remetentes.json
 painel-log.txt
+painel.db
+painel.db-wal
+painel.db-shm
 
 # Artefatos de build do instalador
 .chromium-cache/

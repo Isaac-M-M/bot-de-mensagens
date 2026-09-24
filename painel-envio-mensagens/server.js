@@ -19,19 +19,32 @@ const xlsx = require("xlsx");
 const nodemailer = require("nodemailer");
 const multer = require("multer");
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const db = require("./db");
 
 // Limite diário de envios por conta (o Gmail comum permite ~500/dia;
-// deixamos uma margem de segurança abaixo disso).
+// deixamos uma margem de segurança abaixo disso). Contas de outros
+// provedores/Workspace podem aguentar mais — dá pra ajustar aqui.
 const LIMITE_DIARIO_POR_REMETENTE = 400;
+
+// Palavras que, numa resposta recebida pelo WhatsApp, indicam que a
+// pessoa não quer mais receber mensagens — usado pra alimentar a
+// blacklist automaticamente, sem precisar de ninguém marcando na mão.
+const PALAVRAS_DESCADASTRO = [
+  "não quero", "nao quero", "pare de mandar", "para de mandar",
+  "não me mande", "nao me mande", "remove", "remova", "descadastr",
+  "sair da lista", "cancelar", "não interessa", "nao interessa",
+  "para de enviar", "não envie mais", "nao envie mais",
+];
 
 let httpServer = null;
 let waClient = null;
+let temporizadorAgendamento = null;
 
 /**
  * @param {object} opts
  * @param {string} opts.dataDir - pasta onde ficam .env, contatos.xlsx,
- *   controle-remetentes.json e a sessão do WhatsApp (dados do usuário,
- *   separados dos arquivos do programa em si).
+ *   painel.db, controle-remetentes.json e a sessão do WhatsApp (dados do
+ *   usuário, separados dos arquivos do programa em si).
  * @param {number} [opts.porta] - porta preferida (padrão 3000; se estiver
  *   ocupada, tenta as próximas automaticamente).
  * @returns {Promise<{ porta: number }>}
@@ -42,6 +55,9 @@ function iniciarServidor({ dataDir, porta }) {
 
     const ARQUIVO_ENV = path.join(dataDir, ".env");
     require("dotenv").config({ path: ARQUIVO_ENV });
+
+    db.iniciarBanco(dataDir);
+    migrarRemetentesDoEnvParaBanco();
 
     const ARQUIVO_CONTATOS = path.join(dataDir, "contatos.xlsx");
     const ARQUIVO_MODELO = path.join(__dirname, "contatos-exemplo.xlsx");
@@ -100,6 +116,28 @@ function iniciarServidor({ dataDir, porta }) {
       console.log("⚠️ WhatsApp desconectado:", motivo);
     });
 
+    // Blacklist automática via WhatsApp: se a pessoa responder algo do
+    // tipo "não quero mais", "remove", "descadastra" etc., ela entra na
+    // blacklist sozinha — sem precisar de ninguém marcando na mão.
+    waClient.on("message", (msg) => {
+      try {
+        if (!msg || msg.fromMe || !msg.body) return;
+        const textoNormalizado = msg.body
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[̀-ͯ]/g, ""); // remove acentos
+        const pareceDescadastro = PALAVRAS_DESCADASTRO.some((palavra) => textoNormalizado.includes(palavra));
+        if (!pareceDescadastro) return;
+
+        const numero = String(msg.from || "").split("@")[0].replace(/\D/g, "");
+        if (!numero) return;
+        db.adicionarNaBlacklist(numero, "whatsapp");
+        console.log(`🚫 ${numero} pediu pra não receber mais mensagens — adicionado à blacklist automaticamente.`);
+      } catch {
+        // Nunca deixa um erro aqui derrubar a conexão do WhatsApp
+      }
+    });
+
     waClient.initialize().catch((err) => {
       console.log("⚠️ Falha ao iniciar o WhatsApp:", err.message);
     });
@@ -150,41 +188,108 @@ function iniciarServidor({ dataDir, porta }) {
       return new Promise((resolve2) => setTimeout(resolve2, ms));
     }
 
-    // ==================== ROTAÇÃO DE REMETENTES ====================
+    function chaveHoje() {
+      return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    // ==================== SERVIDORES DE E-MAIL (multi-provedor) ====================
+
+    // Cada provedor tem seu próprio host/porta de SMTP. "gmail" usa o
+    // atalho "service" do nodemailer (já testado e funcionando); os
+    // outros usam host/porta explícitos pra não depender da lista interna
+    // de "serviços conhecidos" do nodemailer, que pode mudar de versão
+    // pra versão.
+    const CONFIG_PROVEDOR = {
+      gmail: { service: "gmail" },
+      outlook: { host: "smtp.office365.com", port: 587, secure: false },
+      zoho: { host: "smtp.zoho.com", port: 465, secure: true },
+      hostinger: { host: "smtp.hostinger.com", port: 465, secure: true },
+      godaddy: { host: "smtpout.secureserver.net", port: 465, secure: true },
+    };
+
+    function criarTransportador(servidor) {
+      const base =
+        servidor.provedor === "custom"
+          ? { host: servidor.host, port: servidor.porta, secure: Boolean(servidor.seguro) }
+          : CONFIG_PROVEDOR[servidor.provedor] || CONFIG_PROVEDOR.gmail;
+      return nodemailer.createTransport({
+        ...base,
+        auth: { user: servidor.usuario, pass: servidor.senha },
+        // Sem isso, uma rede com problema (ou credencial que nunca responde)
+        // deixaria "Testar conexão" ou um envio pendurado pra sempre.
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
+      });
+    }
+
+    // Erros do Gmail/SMTP que indicam bloqueio/limite (vs. erro pontual,
+    // tipo e-mail de destino inválido, que não deve trocar de remetente)
+    function pareceBloqueioDeConta(err) {
+      const msg = ((err && err.message) || "").toLowerCase();
+      return (
+        msg.includes("invalid login") ||
+        msg.includes("too many login attempts") ||
+        msg.includes("quota") ||
+        msg.includes("rate limit") ||
+        msg.includes("suspended") ||
+        msg.includes("5.7.0") ||
+        msg.includes("5.4.5")
+      );
+    }
+
+    // Erros que indicam que o endereço de destino simplesmente não existe
+    // (bounce) — nesse caso, o e-mail entra sozinho na blacklist, porque
+    // não faz sentido tentar mandar pra ele de novo numa próxima campanha.
+    function pareceEnderecoInexistente(err) {
+      const msg = ((err && err.message) || "").toLowerCase();
+      return (
+        msg.includes("does not exist") ||
+        msg.includes("user unknown") ||
+        msg.includes("no such user") ||
+        msg.includes("recipient address rejected") ||
+        msg.includes("mailbox unavailable") ||
+        msg.includes("5.1.1")
+      );
+    }
 
     // Lê todos os remetentes cadastrados no .env, no formato:
     //   GMAIL_USER_1 / GMAIL_APP_PASSWORD_1
-    //   GMAIL_USER_2 / GMAIL_APP_PASSWORD_2
-    //   ...
-    // Também aceita o formato antigo (GMAIL_USER / GMAIL_APP_PASSWORD) como
-    // remetente único, pra quem ainda não migrou.
-    function lerRemetentes() {
-      const remetentes = [];
-
+    //   GMAIL_USER_2 / GMAIL_APP_PASSWORD_2 ...
+    // Também aceita o formato antigo (GMAIL_USER / GMAIL_APP_PASSWORD).
+    // Roda só uma vez, na primeira inicialização — a partir daí, contas
+    // de e-mail vivem no banco de dados (tela de Servidores de E-mail),
+    // não mais no .env.
+    function migrarRemetentesDoEnvParaBanco() {
+      const doEnv = [];
       if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-        remetentes.push({ email: process.env.GMAIL_USER, senha: process.env.GMAIL_APP_PASSWORD });
+        doEnv.push({ email: process.env.GMAIL_USER, senha: process.env.GMAIL_APP_PASSWORD });
       }
-
       let i = 1;
       while (process.env[`GMAIL_USER_${i}`]) {
         const email = process.env[`GMAIL_USER_${i}`];
         const senha = process.env[`GMAIL_APP_PASSWORD_${i}`];
-        if (email && senha) remetentes.push({ email, senha });
+        if (email && senha) doEnv.push({ email, senha });
         i++;
       }
 
-      // Remove duplicados (caso alguém cadastre o mesmo e-mail nos dois formatos)
-      const vistos = new Set();
-      return remetentes.filter((r) => {
-        if (vistos.has(r.email)) return false;
-        vistos.add(r.email);
-        return true;
-      });
+      const existentes = new Set(db.listarServidoresEmail().map((s) => s.usuario));
+      for (const conta of doEnv) {
+        if (existentes.has(conta.email)) continue;
+        db.criarServidorEmail({
+          apelido: conta.email,
+          provedor: "gmail",
+          host: null,
+          porta: null,
+          seguro: true,
+          usuario: conta.email,
+          senha: conta.senha,
+        });
+        console.log(`ℹ️  Conta ${conta.email} migrada do .env para a tela de Servidores de E-mail.`);
+      }
     }
 
-    function chaveHoje() {
-      return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    }
+    // ==================== ROTAÇÃO DE REMETENTES ====================
 
     function lerControleRemetentes() {
       if (!fs.existsSync(ARQUIVO_CONTROLE_REMETENTES)) return {};
@@ -200,38 +305,38 @@ function iniciarServidor({ dataDir, porta }) {
     }
 
     // Retorna o estado de hoje para um remetente: { enviados, bloqueado }
-    function estadoDeHoje(controle, email) {
+    function estadoDeHoje(controle, usuario) {
       const hoje = chaveHoje();
-      const registro = controle[email];
+      const registro = controle[usuario];
       if (!registro || registro.data !== hoje) {
         return { data: hoje, enviados: 0, bloqueado: false };
       }
       return registro;
     }
 
-    function registrarEnvio(email) {
+    function registrarEnvioRemetente(usuario) {
       const controle = lerControleRemetentes();
-      const estado = estadoDeHoje(controle, email);
+      const estado = estadoDeHoje(controle, usuario);
       estado.enviados += 1;
-      controle[email] = estado;
+      controle[usuario] = estado;
       salvarControleRemetentes(controle);
     }
 
-    function registrarBloqueio(email) {
+    function registrarBloqueioRemetente(usuario) {
       const controle = lerControleRemetentes();
-      const estado = estadoDeHoje(controle, email);
+      const estado = estadoDeHoje(controle, usuario);
       estado.bloqueado = true;
-      controle[email] = estado;
+      controle[usuario] = estado;
       salvarControleRemetentes(controle);
     }
 
-    // Escolhe o próximo remetente disponível (não bloqueado, abaixo do limite
-    // diário), ignorando os que já falharam nessa mesma rodada de envio.
+    // Escolhe o próximo remetente disponível (não bloqueado, abaixo do
+    // limite diário), ignorando os que já falharam nessa mesma rodada.
     function proximoRemetenteDisponivel(remetentes, jaTentados) {
       const controle = lerControleRemetentes();
       for (const r of remetentes) {
-        if (jaTentados.has(r.email)) continue;
-        const estado = estadoDeHoje(controle, r.email);
+        if (jaTentados.has(r.usuario)) continue;
+        const estado = estadoDeHoje(controle, r.usuario);
         if (estado.bloqueado) continue;
         if (estado.enviados >= LIMITE_DIARIO_POR_REMETENTE) continue;
         return r;
@@ -239,24 +344,11 @@ function iniciarServidor({ dataDir, porta }) {
       return null;
     }
 
-    // Erros do Gmail que indicam bloqueio/limite (vs. erro pontual, tipo
-    // e-mail de destino inválido, que não deve trocar de remetente)
-    function pareceBloqueioDeConta(err) {
-      const msg = ((err && err.message) || "").toLowerCase();
-      return (
-        msg.includes("invalid login") ||
-        msg.includes("too many login attempts") ||
-        msg.includes("quota") ||
-        msg.includes("rate limit") ||
-        msg.includes("suspended") ||
-        msg.includes("5.7.0") ||
-        msg.includes("5.4.5")
-      );
-    }
-
     // Tenta enviar um e-mail, trocando de remetente automaticamente se um
-    // deles estiver bloqueado ou tiver batido o limite do dia.
-    async function enviarComRotacao(remetentes, destinatario, assunto, texto) {
+    // deles estiver bloqueado ou tiver batido o limite do dia. Se o erro
+    // parecer um endereço que não existe, o destinatário entra sozinho
+    // na blacklist (bounce automático).
+    async function enviarComRotacao(remetentes, destinatario, assunto, texto, campanhaId) {
       const jaTentados = new Set();
 
       while (true) {
@@ -265,27 +357,171 @@ function iniciarServidor({ dataDir, porta }) {
           throw new Error("Nenhum remetente disponível (todos bloqueados ou no limite diário).");
         }
 
-        const transporter = nodemailer.createTransport({
-          service: "gmail",
-          auth: { user: remetente.email, pass: remetente.senha },
-        });
+        const transporter = criarTransportador(remetente);
 
         try {
-          await transporter.sendMail({ from: remetente.email, to: destinatario, subject: assunto, text: texto });
-          registrarEnvio(remetente.email);
-          return { remetenteUsado: remetente.email };
+          await transporter.sendMail({ from: remetente.usuario, to: destinatario, subject: assunto, html: texto });
+          registrarEnvioRemetente(remetente.usuario);
+          return { remetenteUsado: remetente.usuario };
         } catch (err) {
-          jaTentados.add(remetente.email);
+          jaTentados.add(remetente.usuario);
+          if (pareceEnderecoInexistente(err)) {
+            db.adicionarNaBlacklist(destinatario, "bounce", campanhaId);
+            console.log(`🚫 ${destinatario} não existe — adicionado à blacklist automaticamente.`);
+          }
           if (pareceBloqueioDeConta(err)) {
-            registrarBloqueio(remetente.email);
-            console.log(`⚠️  Remetente ${remetente.email} parece bloqueado/no limite. Tentando o próximo...`);
+            registrarBloqueioRemetente(remetente.usuario);
+            console.log(`⚠️  Remetente ${remetente.usuario} parece bloqueado/no limite. Tentando o próximo...`);
             continue; // tenta o próximo remetente
           }
-          // Erro que não é de bloqueio de conta (ex: e-mail de destino inválido) — não adianta trocar de remetente
+          // Erro que não é de bloqueio de conta — não adianta trocar de remetente
           throw err;
         }
       }
     }
+
+    // ==================== EXECUÇÃO DE CAMPANHA ====================
+
+    // Núcleo do envio: usado tanto pela tela de "envio rápido" quanto
+    // pelas campanhas salvas/agendadas — assim o log de entrega e a
+    // blacklist funcionam do mesmo jeito nos dois casos.
+    async function executarCampanha(campanha) {
+      const resultados = [];
+
+      if (campanha.canal === "whatsapp") {
+        if (whatsappStatus !== "conectado") {
+          throw new Error("WhatsApp ainda não está conectado. Escaneie o QR Code primeiro.");
+        }
+
+        if (campanha.tipo_destino === "planilha") {
+          const contatos = lerContatos().filter((c) => c.telefone);
+          for (const contato of contatos) {
+            const numero = formatarTelefone(contato.telefone);
+            if (numero && db.estaNaBlacklist(numero)) {
+              db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.telefone, nomeContato: contato.nome, canal: "whatsapp", status: "bloqueado_blacklist" });
+              resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "bloqueado", detalhe: "na blacklist" });
+              continue;
+            }
+            try {
+              const base = contato.mensagem || campanha.mensagem;
+              if (!base || !base.trim()) {
+                db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.telefone, nomeContato: contato.nome, canal: "whatsapp", status: "erro", detalhe: "sem mensagem" });
+                resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "sem mensagem (nem individual, nem padrão)" });
+                continue;
+              }
+              const chatId = await resolverChatId(contato.telefone);
+              if (!chatId) {
+                db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.telefone, nomeContato: contato.nome, canal: "whatsapp", status: "erro", detalhe: "número não está no WhatsApp" });
+                resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "número não está no WhatsApp" });
+                continue;
+              }
+              const texto = personalizar(base, contato);
+              await waClient.sendMessage(chatId, texto);
+              db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.telefone, nomeContato: contato.nome, canal: "whatsapp", status: "enviado" });
+              resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "enviado" });
+            } catch (err) {
+              db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.telefone, nomeContato: contato.nome, canal: "whatsapp", status: "erro", detalhe: err.message });
+              resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: err.message });
+            }
+            await delay(8000 + Math.random() * 7000); // 8-15s entre mensagens
+          }
+        } else {
+          // "unico" ou "grupo": um destino só
+          const numero = formatarTelefone(campanha.destino);
+          if (numero && db.estaNaBlacklist(numero)) {
+            db.registrarEnvioLog({ campanhaId: campanha.id, destino: campanha.destino, canal: "whatsapp", status: "bloqueado_blacklist" });
+            resultados.push({ destino: campanha.destino, status: "bloqueado", detalhe: "na blacklist" });
+          } else {
+            const chatId = await resolverChatId(campanha.destino);
+            if (!chatId) {
+              throw new Error("Esse número não está no WhatsApp (ou o formato está incorreto).");
+            }
+            await waClient.sendMessage(chatId, campanha.mensagem);
+            db.registrarEnvioLog({ campanhaId: campanha.id, destino: campanha.destino, canal: "whatsapp", status: "enviado" });
+            resultados.push({ destino: campanha.destino, status: "enviado" });
+          }
+        }
+      } else if (campanha.canal === "email") {
+        const remetentes = campanha.servidor_email_id
+          ? [db.obterServidorEmail(campanha.servidor_email_id)].filter((s) => s && s.ativo)
+          : db.listarServidoresEmail({ apenasAtivos: true });
+        if (remetentes.length === 0) {
+          throw new Error("Nenhum servidor de e-mail ativo cadastrado.");
+        }
+
+        const contatos = lerContatos().filter((c) => c.email);
+        for (const contato of contatos) {
+          if (db.estaNaBlacklist(contato.email)) {
+            db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.email, nomeContato: contato.nome, canal: "email", status: "bloqueado_blacklist" });
+            resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "bloqueado", detalhe: "na blacklist" });
+            continue;
+          }
+          try {
+            const base = contato.mensagem || campanha.mensagem;
+            if (!base || !base.trim()) {
+              db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.email, nomeContato: contato.nome, canal: "email", status: "erro", detalhe: "sem mensagem" });
+              resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "erro", detalhe: "sem mensagem (nem individual, nem padrão)" });
+              continue;
+            }
+            const texto = personalizar(base, contato);
+            const { remetenteUsado } = await enviarComRotacao(remetentes, contato.email, campanha.assunto, texto, campanha.id);
+            db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.email, nomeContato: contato.nome, canal: "email", status: "enviado", detalhe: `via ${remetenteUsado}` });
+            resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "enviado", detalhe: `via ${remetenteUsado}` });
+          } catch (err) {
+            db.registrarEnvioLog({ campanhaId: campanha.id, destino: contato.email, nomeContato: contato.nome, canal: "email", status: "erro", detalhe: err.message });
+            resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "erro", detalhe: err.message });
+          }
+          await delay(2000); // 2s entre e-mails, ritmo mais tranquilo que o WhatsApp
+        }
+      }
+
+      db.atualizarCampanha(campanha.id, { status: "concluida" });
+      return resultados;
+    }
+
+    // ==================== AGENDAMENTO ====================
+
+    function diaDaSemanaHoje() {
+      return new Date().getDay(); // 0=domingo ... 6=sábado
+    }
+
+    function horaAtualHHMM() {
+      const agora = new Date();
+      return `${String(agora.getHours()).padStart(2, "0")}:${String(agora.getMinutes()).padStart(2, "0")}`;
+    }
+
+    async function verificarAgendamentos() {
+      const hoje = chaveHoje();
+      const horaAgora = horaAtualHHMM();
+      const diaSemana = diaDaSemanaHoje();
+
+      const campanhas = db.listarCampanhas().filter((c) => c.agendamento_dias && c.agendamento_hora);
+      for (const campanha of campanhas) {
+        if (campanha.ultima_execucao === hoje) continue; // já rodou hoje
+        let dias;
+        try {
+          dias = JSON.parse(campanha.agendamento_dias);
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(dias) || !dias.includes(diaSemana)) continue;
+        if (horaAgora < campanha.agendamento_hora) continue; // ainda não chegou a hora
+
+        console.log(`⏰ Disparando campanha agendada: "${campanha.nome}"`);
+        db.marcarExecucaoCampanha(campanha.id, hoje);
+        try {
+          await executarCampanha(campanha);
+        } catch (err) {
+          console.log(`⚠️  Erro ao executar campanha agendada "${campanha.nome}":`, err.message);
+          db.atualizarCampanha(campanha.id, { status: "erro" });
+        }
+      }
+    }
+
+    temporizadorAgendamento = setInterval(() => {
+      verificarAgendamentos().catch(() => {});
+    }, 60 * 1000);
+    setTimeout(() => verificarAgendamentos().catch(() => {}), 15 * 1000);
 
     // ==================== ROTAS ====================
 
@@ -359,9 +595,6 @@ function iniciarServidor({ dataDir, porta }) {
       }
 
       let conteudo = `PAINEL_USUARIO=${painelUsuario.trim()}\nPAINEL_SENHA=${painelSenha.trim()}\n`;
-      if (gmailUser && gmailUser.trim() && gmailSenha && gmailSenha.trim()) {
-        conteudo += `GMAIL_USER_1=${gmailUser.trim()}\nGMAIL_APP_PASSWORD_1=${gmailSenha.trim()}\n`;
-      }
       conteudo += `PORTA=${PORTA_PREFERIDA}\n`;
       conteudo += `SESSAO_SEGREDO=${crypto.randomBytes(32).toString("hex")}\n`;
 
@@ -373,6 +606,18 @@ function iniciarServidor({ dataDir, porta }) {
 
       // Aplica na hora, sem precisar reiniciar o programa
       require("dotenv").config({ path: ARQUIVO_ENV });
+
+      if (gmailUser && gmailUser.trim() && gmailSenha && gmailSenha.trim()) {
+        db.criarServidorEmail({
+          apelido: gmailUser.trim(),
+          provedor: "gmail",
+          host: null,
+          porta: null,
+          seguro: true,
+          usuario: gmailUser.trim(),
+          senha: gmailSenha.trim(),
+        });
+      }
 
       res.json({ ok: true });
     });
@@ -466,105 +711,177 @@ function iniciarServidor({ dataDir, porta }) {
       });
     });
 
-    // Envio por WhatsApp
+    // ---------- Envio rápido (avulso) — cria uma campanha por trás dos
+    // panos, pra tudo que é enviado ficar registrado no mesmo lugar ----------
+
     app.post("/enviar/whatsapp", async (req, res) => {
       const { tipoDestino, destino, mensagem } = req.body;
 
       if (whatsappStatus !== "conectado") {
         return res.status(400).json({ erro: "WhatsApp ainda não está conectado. Escaneie o QR Code primeiro." });
       }
-      // A mensagem padrão só é obrigatória se não for "lista da planilha" —
-      // nesse modo, cada contato pode ter sua própria mensagem na coluna "mensagem".
       if (tipoDestino !== "planilha" && (!mensagem || !mensagem.trim())) {
         return res.status(400).json({ erro: "Mensagem vazia." });
       }
+      if (tipoDestino !== "planilha" && (!destino || !destino.trim())) {
+        return res.status(400).json({ erro: "Informe o destino (número ou ID do grupo)." });
+      }
 
-      const resultados = [];
+      const campanha = db.criarCampanha({
+        nome: `Envio rápido — ${new Date().toLocaleString("pt-BR")}`,
+        canal: "whatsapp",
+        tipoDestino,
+        destino,
+        mensagem,
+      });
 
       try {
-        if (tipoDestino === "unico" || tipoDestino === "grupo") {
-          if (!destino || !destino.trim()) {
-            return res.status(400).json({ erro: "Informe o destino (número ou ID do grupo)." });
-          }
-          const chatId = await resolverChatId(destino);
-          if (!chatId) {
-            return res.status(400).json({ erro: "Esse número não está no WhatsApp (ou o formato está incorreto)." });
-          }
-          await waClient.sendMessage(chatId, mensagem);
-          resultados.push({ destino, status: "enviado" });
-        } else if (tipoDestino === "planilha") {
-          const contatos = lerContatos().filter((c) => c.telefone);
-          if (contatos.length === 0) {
-            return res.status(400).json({ erro: "Nenhum contato com telefone encontrado em contatos.xlsx." });
-          }
-          for (const contato of contatos) {
-            try {
-              const base = contato.mensagem || mensagem;
-              if (!base || !base.trim()) {
-                resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "sem mensagem (nem individual, nem padrão)" });
-                continue;
-              }
-              const chatId = await resolverChatId(contato.telefone);
-              if (!chatId) {
-                resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: "número não está no WhatsApp" });
-                continue;
-              }
-              const texto = personalizar(base, contato);
-              await waClient.sendMessage(chatId, texto);
-              resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "enviado" });
-            } catch (err) {
-              resultados.push({ destino: `${contato.nome} (${contato.telefone})`, status: "erro", detalhe: err.message });
-            }
-            await delay(8000 + Math.random() * 7000); // 8-15s entre mensagens
-          }
-        } else {
-          return res.status(400).json({ erro: "tipoDestino inválido." });
-        }
-
+        const resultados = await executarCampanha(campanha);
         res.json({ ok: true, resultados });
       } catch (err) {
+        db.atualizarCampanha(campanha.id, { status: "erro" });
         res.status(500).json({ erro: err.message });
       }
     });
 
-    // Envio por E-mail (sempre em lista, via planilha, com rotação de remetentes)
     app.post("/enviar/email", async (req, res) => {
       const { assunto, mensagem } = req.body;
 
       if (!assunto || !assunto.trim()) {
         return res.status(400).json({ erro: "Informe o assunto do e-mail." });
       }
-      // A mensagem padrão é opcional aqui — cada contato pode ter a sua própria
-      // na coluna "mensagem" da planilha. Só validamos por contato, mais abaixo.
 
-      const remetentes = lerRemetentes();
-      if (remetentes.length === 0) {
-        return res.status(400).json({ erro: "Nenhum remetente configurado no .env (GMAIL_USER_1/GMAIL_APP_PASSWORD_1, etc.)." });
+      const campanha = db.criarCampanha({
+        nome: `Envio rápido — ${new Date().toLocaleString("pt-BR")}`,
+        canal: "email",
+        assunto,
+        mensagem,
+      });
+
+      try {
+        const resultados = await executarCampanha(campanha);
+        res.json({ ok: true, resultados });
+      } catch (err) {
+        db.atualizarCampanha(campanha.id, { status: "erro" });
+        res.status(400).json({ erro: err.message });
       }
+    });
 
-      const contatos = lerContatos().filter((c) => c.email);
-      if (contatos.length === 0) {
-        return res.status(400).json({ erro: "Nenhum contato com e-mail encontrado em contatos.xlsx." });
+    // ==================== SERVIDORES DE E-MAIL ====================
+
+    app.get("/api/servidores-email", (req, res) => {
+      const servidores = db.listarServidoresEmail().map((s) => ({ ...s, senha: undefined }));
+      res.json({ servidores });
+    });
+
+    app.post("/api/servidores-email", (req, res) => {
+      const { apelido, provedor, host, porta, seguro, usuario, senha } = req.body || {};
+      if (!apelido || !provedor || !usuario || !senha) {
+        return res.status(400).json({ erro: "Preencha apelido, provedor, usuário e senha." });
       }
-
-      const resultados = [];
-      for (const contato of contatos) {
-        try {
-          const base = contato.mensagem || mensagem;
-          if (!base || !base.trim()) {
-            resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "erro", detalhe: "sem mensagem (nem individual, nem padrão)" });
-            continue;
-          }
-          const texto = personalizar(base, contato);
-          const { remetenteUsado } = await enviarComRotacao(remetentes, contato.email, assunto, texto);
-          resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "enviado", detalhe: `via ${remetenteUsado}` });
-        } catch (err) {
-          resultados.push({ destino: `${contato.nome} (${contato.email})`, status: "erro", detalhe: err.message });
-        }
-        await delay(2000); // 2s entre e-mails, ritmo mais tranquilo que o WhatsApp
+      if (provedor === "custom" && (!host || !porta)) {
+        return res.status(400).json({ erro: "Provedor customizado precisa de host e porta." });
       }
+      try {
+        const servidor = db.criarServidorEmail({ apelido, provedor, host, porta, seguro, usuario, senha });
+        res.json({ ok: true, servidor: { ...servidor, senha: undefined } });
+      } catch (err) {
+        res.status(400).json({ erro: err.message.includes("UNIQUE") ? "Já existe um servidor com esse usuário." : err.message });
+      }
+    });
 
-      res.json({ ok: true, resultados });
+    app.put("/api/servidores-email/:id", (req, res) => {
+      const servidor = db.atualizarServidorEmail(Number(req.params.id), req.body || {});
+      if (!servidor) return res.status(404).json({ erro: "Servidor não encontrado." });
+      res.json({ ok: true, servidor: { ...servidor, senha: undefined } });
+    });
+
+    app.delete("/api/servidores-email/:id", (req, res) => {
+      db.excluirServidorEmail(Number(req.params.id));
+      res.json({ ok: true });
+    });
+
+    app.post("/api/servidores-email/:id/testar", async (req, res) => {
+      const servidor = db.obterServidorEmail(Number(req.params.id));
+      if (!servidor) return res.status(404).json({ erro: "Servidor não encontrado." });
+      try {
+        const transporter = criarTransportador(servidor);
+        await transporter.verify();
+        res.json({ ok: true, mensagem: "Conexão feita com sucesso!" });
+      } catch (err) {
+        res.status(400).json({ erro: `Falha na conexão: ${err.message}` });
+      }
+    });
+
+    // ==================== BLACKLIST ====================
+
+    app.get("/api/blacklist", (req, res) => {
+      res.json({ blacklist: db.listarBlacklist() });
+    });
+
+    app.post("/api/blacklist", (req, res) => {
+      const { valor } = req.body || {};
+      if (!valor || !valor.trim()) return res.status(400).json({ erro: "Informe um e-mail ou telefone." });
+      db.adicionarNaBlacklist(valor.trim(), "manual");
+      res.json({ ok: true });
+    });
+
+    app.delete("/api/blacklist/:valor", (req, res) => {
+      db.removerDaBlacklist(decodeURIComponent(req.params.valor));
+      res.json({ ok: true });
+    });
+
+    // ==================== CAMPANHAS ====================
+
+    app.get("/api/campanhas", (req, res) => {
+      res.json({ campanhas: db.listarCampanhas() });
+    });
+
+    app.get("/api/campanhas/:id", (req, res) => {
+      const campanha = db.obterCampanha(Number(req.params.id));
+      if (!campanha) return res.status(404).json({ erro: "Campanha não encontrada." });
+      res.json({
+        campanha,
+        resumo: db.resumoDaCampanha(campanha.id),
+        envios: db.listarEnviosDaCampanha(campanha.id),
+      });
+    });
+
+    app.post("/api/campanhas", (req, res) => {
+      const { nome, canal, tipoDestino, destino, assunto, mensagem, servidorEmailId, agendamentoDias, agendamentoHora } = req.body || {};
+      if (!nome || !nome.trim()) return res.status(400).json({ erro: "Dê um nome pra campanha." });
+      if (!canal || !["whatsapp", "email"].includes(canal)) return res.status(400).json({ erro: "Canal inválido." });
+      if (!mensagem || !mensagem.trim()) return res.status(400).json({ erro: "Escreva a mensagem da campanha." });
+      if (agendamentoDias && agendamentoDias.length > 0 && !agendamentoHora) {
+        return res.status(400).json({ erro: "Defina um horário pro agendamento." });
+      }
+      const campanha = db.criarCampanha({ nome, canal, tipoDestino, destino, assunto, mensagem, servidorEmailId, agendamentoDias, agendamentoHora });
+      res.json({ ok: true, campanha });
+    });
+
+    app.put("/api/campanhas/:id", (req, res) => {
+      const campanha = db.atualizarCampanha(Number(req.params.id), req.body || {});
+      if (!campanha) return res.status(404).json({ erro: "Campanha não encontrada." });
+      res.json({ ok: true, campanha });
+    });
+
+    app.delete("/api/campanhas/:id", (req, res) => {
+      db.excluirCampanha(Number(req.params.id));
+      res.json({ ok: true });
+    });
+
+    app.post("/api/campanhas/:id/enviar", async (req, res) => {
+      const campanha = db.obterCampanha(Number(req.params.id));
+      if (!campanha) return res.status(404).json({ erro: "Campanha não encontrada." });
+      db.atualizarCampanha(campanha.id, { status: "enviando" });
+      try {
+        const resultados = await executarCampanha(campanha);
+        db.marcarExecucaoCampanha(campanha.id, chaveHoje());
+        res.json({ ok: true, resultados });
+      } catch (err) {
+        db.atualizarCampanha(campanha.id, { status: "erro" });
+        res.status(400).json({ erro: err.message });
+      }
     });
 
     // Tenta a porta preferida e, se estiver ocupada, vai tentando as
@@ -590,11 +907,17 @@ function iniciarServidor({ dataDir, porta }) {
   });
 }
 
-// Encerra tudo de forma limpa: fecha o servidor HTTP e desliga o WhatsApp
-// (que por baixo dos panos mantém um Chromium aberto — se não fechar
-// direito, ele continua rodando escondido e "trava" a próxima abertura).
+// Encerra tudo de forma limpa: fecha o servidor HTTP, o agendador, o
+// banco de dados e desliga o WhatsApp (que por baixo dos panos mantém um
+// Chromium aberto — se não fechar direito, ele continua rodando escondido
+// e "trava" a próxima abertura).
 async function encerrarServidor() {
   const tarefas = [];
+
+  if (temporizadorAgendamento) {
+    clearInterval(temporizadorAgendamento);
+    temporizadorAgendamento = null;
+  }
 
   if (httpServer) {
     const servidor = httpServer;
@@ -609,6 +932,7 @@ async function encerrarServidor() {
   }
 
   await Promise.all(tarefas);
+  db.fecharBanco();
 }
 
 module.exports = { iniciarServidor, encerrarServidor };
