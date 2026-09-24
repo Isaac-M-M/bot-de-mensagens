@@ -79,7 +79,18 @@ function iniciarBanco(dataDir) {
     CREATE INDEX IF NOT EXISTS idx_eventos_envio ON eventos(envio_id);
   `);
 
+  // Migração: adiciona colunas novas em bancos já existentes (criados por
+  // uma versão anterior do programa), sem apagar nada que já estava lá.
+  garantirColuna("servidores_email", "ultimo_uid_imap", "INTEGER");
+
   return db;
+}
+
+function garantirColuna(tabela, coluna, definicaoSql) {
+  const colunas = db.prepare(`PRAGMA table_info(${tabela})`).all();
+  if (!colunas.some((c) => c.name === coluna)) {
+    db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${definicaoSql}`);
+  }
 }
 
 function obterBanco() {
@@ -105,6 +116,12 @@ function listarServidoresEmail({ apenasAtivos = false } = {}) {
 
 function obterServidorEmail(id) {
   return obterBanco().prepare("SELECT * FROM servidores_email WHERE id = ?").get(id);
+}
+
+// Guarda até onde já foi checada a caixa de entrada (via IMAP) em busca de
+// respostas negativas — evita reprocessar os mesmos e-mails a cada checagem.
+function atualizarUltimoUidImap(id, uid) {
+  obterBanco().prepare("UPDATE servidores_email SET ultimo_uid_imap = ? WHERE id = ?").run(uid, id);
 }
 
 function criarServidorEmail({ apelido, provedor, host, porta, seguro, usuario, senha }) {
@@ -218,9 +235,16 @@ function atualizarCampanha(id, dados) {
       assunto: dados.assunto ?? atual.assunto,
       mensagem: dados.mensagem ?? atual.mensagem,
       servidor_email_id: dados.servidorEmailId ?? atual.servidor_email_id,
-      agendamento_dias: dados.agendamentoDias !== undefined ? JSON.stringify(dados.agendamentoDias) : atual.agendamento_dias,
-      agendamento_hora: dados.agendamentoHora ?? atual.agendamento_hora,
-      status: dados.status ?? atual.status,
+      agendamento_dias:
+        dados.agendamentoDias !== undefined
+          ? dados.agendamentoDias
+            ? JSON.stringify(dados.agendamentoDias)
+            : null
+          : atual.agendamento_dias,
+      agendamento_hora: dados.agendamentoDias !== undefined && !dados.agendamentoDias ? null : dados.agendamentoHora ?? atual.agendamento_hora,
+      status:
+        dados.status ??
+        (dados.agendamentoDias !== undefined ? (dados.agendamentoDias ? "agendada" : "rascunho") : atual.status),
     });
   return obterCampanha(id);
 }
@@ -290,6 +314,7 @@ module.exports = {
   criarServidorEmail,
   atualizarServidorEmail,
   excluirServidorEmail,
+  atualizarUltimoUidImap,
   normalizarContato,
   estaNaBlacklist,
   adicionarNaBlacklist,

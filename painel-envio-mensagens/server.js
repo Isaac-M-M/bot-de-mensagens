@@ -18,6 +18,8 @@ const QRCode = require("qrcode");
 const xlsx = require("xlsx");
 const nodemailer = require("nodemailer");
 const multer = require("multer");
+const { ImapFlow } = require("imapflow");
+const { simpleParser } = require("mailparser");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const db = require("./db");
 
@@ -39,6 +41,7 @@ const PALAVRAS_DESCADASTRO = [
 let httpServer = null;
 let waClient = null;
 let temporizadorAgendamento = null;
+let temporizadorRespostasEmail = null;
 
 /**
  * @param {object} opts
@@ -221,6 +224,95 @@ function iniciarServidor({ dataDir, porta }) {
         greetingTimeout: 15000,
         socketTimeout: 20000,
       });
+    }
+
+    // O mesmo, só que pra IMAP (leitura da caixa de entrada) — usado pra
+    // detectar resposta negativa recebida por e-mail. Só funciona pros
+    // provedores conhecidos; "custom" não tem host de IMAP cadastrado.
+    const CONFIG_IMAP_PROVEDOR = {
+      gmail: { host: "imap.gmail.com", port: 993 },
+      outlook: { host: "outlook.office365.com", port: 993 },
+      zoho: { host: "imap.zoho.com", port: 993 },
+      hostinger: { host: "imap.hostinger.com", port: 993 },
+      godaddy: { host: "imap.secureserver.net", port: 993 },
+    };
+
+    // Checa a caixa de entrada de cada conta de e-mail cadastrada em busca
+    // de respostas com palavras de descadastro — igual ao que já fazemos
+    // pra mensagens recebidas no WhatsApp, mas aqui via IMAP. Só olha
+    // e-mails novos desde a última checagem (guardado por conta no banco);
+    // na primeira vez que roda pra uma conta, só marca "a partir de agora"
+    // e não varre o histórico inteiro da caixa de entrada.
+    async function verificarRespostasNegativasPorEmail() {
+      const servidores = db.listarServidoresEmail({ apenasAtivos: true }).filter((s) => s.provedor !== "custom");
+
+      for (const servidor of servidores) {
+        const configImap = CONFIG_IMAP_PROVEDOR[servidor.provedor];
+        if (!configImap) continue;
+
+        let client = null;
+        try {
+          client = new ImapFlow({
+            host: configImap.host,
+            port: configImap.port,
+            secure: true,
+            auth: { user: servidor.usuario, pass: servidor.senha },
+            logger: false,
+            socketTimeout: 20000,
+          });
+          await client.connect();
+          const caixa = await client.mailboxOpen("INBOX");
+
+          if (!servidor.ultimo_uid_imap) {
+            // Primeira vez checando essa conta: não varre o histórico,
+            // só marca a partir de onde a caixa está agora.
+            db.atualizarUltimoUidImap(servidor.id, caixa.uidNext - 1);
+            await client.logout();
+            continue;
+          }
+
+          const inicio = servidor.ultimo_uid_imap + 1;
+          if (inicio >= caixa.uidNext) {
+            await client.logout();
+            continue; // nada novo desde a última checagem
+          }
+
+          const mensagens = await client.fetchAll(`${inicio}:*`, { envelope: true, source: true }, { uid: true });
+          let maiorUid = servidor.ultimo_uid_imap;
+
+          for (const msg of mensagens) {
+            maiorUid = Math.max(maiorUid, msg.uid);
+            try {
+              const parsed = await simpleParser(msg.source);
+              const textoNormalizado = `${parsed.subject || ""} ${parsed.text || ""}`
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[̀-ͯ]/g, "");
+              const pareceDescadastro = PALAVRAS_DESCADASTRO.some((palavra) => textoNormalizado.includes(palavra));
+              if (!pareceDescadastro) continue;
+
+              const remetente = parsed.from && parsed.from.value && parsed.from.value[0] ? parsed.from.value[0].address : null;
+              if (!remetente) continue;
+              db.adicionarNaBlacklist(remetente, "descadastro");
+              console.log(`🚫 ${remetente} pediu descadastro por e-mail — adicionado à blacklist automaticamente.`);
+            } catch (err) {
+              console.log("⚠️ Erro ao processar um e-mail recebido:", err.message);
+            }
+          }
+
+          db.atualizarUltimoUidImap(servidor.id, maiorUid);
+          await client.logout();
+        } catch (err) {
+          console.log(`⚠️ Não consegui checar a caixa de entrada de ${servidor.usuario}:`, err.message);
+          if (client) {
+            try {
+              await client.logout();
+            } catch {
+              // já desconectado, ignora
+            }
+          }
+        }
+      }
     }
 
     // Erros do Gmail/SMTP que indicam bloqueio/limite (vs. erro pontual,
@@ -522,6 +614,14 @@ function iniciarServidor({ dataDir, porta }) {
       verificarAgendamentos().catch(() => {});
     }, 60 * 1000);
     setTimeout(() => verificarAgendamentos().catch(() => {}), 15 * 1000);
+
+    // Checagem de respostas negativas por e-mail: a cada 5 minutos é
+    // suficiente (não precisa ser em tempo real) e evita sobrecarregar a
+    // conexão IMAP das contas cadastradas.
+    temporizadorRespostasEmail = setInterval(() => {
+      verificarRespostasNegativasPorEmail().catch(() => {});
+    }, 5 * 60 * 1000);
+    setTimeout(() => verificarRespostasNegativasPorEmail().catch(() => {}), 30 * 1000);
 
     // ==================== ROTAS ====================
 
@@ -917,6 +1017,11 @@ async function encerrarServidor() {
   if (temporizadorAgendamento) {
     clearInterval(temporizadorAgendamento);
     temporizadorAgendamento = null;
+  }
+
+  if (temporizadorRespostasEmail) {
+    clearInterval(temporizadorRespostasEmail);
+    temporizadorRespostasEmail = null;
   }
 
   if (httpServer) {
